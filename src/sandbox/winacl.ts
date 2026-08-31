@@ -23,8 +23,19 @@ import type { WinaclSession } from "./win32/index.ts";
 /** ESM 下惰性 require（win32 模块带 koffi，懒加载 + fail-closed）。 */
 const win32Require = createRequire(import.meta.url);
 
+/**
+ * Bun 运行时检测。
+ *
+ * pi 本体由 Bun 编译：Bun 无法安全加载 koffi（koffi 的 N-API finalizer 会扰动 GC state，
+ * 加载即 `napi_reference_unref` panic，**abort 进程而非 throw**）。因此 Bun 下 koffi 不可用，
+ * winacl 必须 fail-closed（available=false），且**在任何 koffi / win32 模块被加载前**就短路。
+ */
+function isBunRuntime(): boolean {
+  return typeof process !== "undefined" && (process.versions as Record<string, string | undefined>).bun !== undefined;
+}
+
 export function winaclUsable(): boolean {
-  return process.platform === "win32";
+  return process.platform === "win32" && !isBunRuntime();
 }
 
 class WinaclBackend implements SandboxBackend {
