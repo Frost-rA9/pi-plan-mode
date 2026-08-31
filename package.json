@@ -1,0 +1,32 @@
+{
+  "name": "pi-planbuild",
+  "version": "4.0.0",
+  "type": "module",
+  "description": "plan/build dual-mode extension for pi (v4, Route X): pi-native log-only state (appendEntry + pure fold), plan file as single source of truth, safety presets = parameterized OS sandbox; Windows readonly/verify via winacl (restricted-token + NTFS ACE, sandbox shell=pwsh), Linux/WSL2 via bwrap.",
+  "keywords": ["pi-package", "pi-extension"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types test/smoke.ts",
+    "probe": "node --experimental-strip-types test/probe-session-fold.ts",
+    "probe:winacl": "node --experimental-strip-types test/probe-winacl.ts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "optionalDependencies": {
+    "koffi": "^3.1.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.4",
+    "@types/node": "^24.0.0",
+    "typebox": "^1.0.0",
+    "typescript": "^5.9.3"
+  }
+}
