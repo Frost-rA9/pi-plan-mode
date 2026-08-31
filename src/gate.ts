@@ -29,8 +29,8 @@ export function registerGate(pi: ExtensionAPI, store: PlanbuildStore): void {
     const { toolName, input } = e;
     const command = input?.command ?? "";
 
-    // 层 0 兜底：写工具任何档位拦截（与工具移除双保险）
-    if (toolName === "edit" || toolName === "write") {
+    // 层 0 兜底（仅 plan 模式）：写工具拦截（与工具移除双保险）；build 模式放行（完整权限）
+    if (store.state.mode === "plan" && (toolName === "edit" || toolName === "write")) {
       return { block: true, reason: "Plan 模式禁写工具（层 0 兜底）：请用 plan_file / 切换 build" };
     }
     if (toolName !== "bash" && toolName !== "powershell") return; // 非 shell 工具放行
