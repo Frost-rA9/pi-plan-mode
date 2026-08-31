@@ -11,6 +11,13 @@
 | `createWinaclSession()` | ✅ 返回真实 `WinaclSessionImpl`（非 win32 / 未自检 → `NoopSession`，isSpawnable=false → fail-closed） |
 | Windows readonly/verify | ✅ 走真实受限令牌 + NTFS ACE 沙箱（pwsh）；非 win32 / 未自检 → 降级 `supervised` |
 
+> **⚠️ 运行时铁律：koffi 必须在独立 Node 子进程（`runner.ts`）里跑，绝不能进 Bun 宿主进程。**
+> pi 宿主是 **Bun**，加载 koffi（原生 N-API 插件）即 `napi_reference_unref` panic（**abort 进程，非 throw**）；而 Bun 的 `bun:ffi` 又读不了裸原生内存（ACL capture-restore / 幂等必需）。因此：
+> - 全部 koffi/Win32 逻辑（`token.ts`/`acl.ts`/`session.ts`/`spawn.ts`/`stdio.ts`…）在 `win32/runner.ts`（Node 子进程）内执行；
+> - pi 侧 `winacl.ts` 只经一条极薄 **IPC**（stdin/stdout 一行一个 JSON：`init`/`exec`/`dispose`，`kill` 经 AbortSignal → `terminateProcess` 终止子进程）驱动它——对齐 dsh runner / codex 原生二进制的「OS 沙箱 = 子进程」模式；
+> - `probe()` 由 `winacl.ts` 用 `spawnSync node --experimental-strip-types runner.ts --probe`（exit 0 = 可用）判定。
+> 非 win32 / 子进程自检未过 → `available=false` → fail-closed 降级（readonly/verify → `supervised`），决不无限制 spawn。
+
 ## 二、接入 seam（已就绪，别改签名）
 `winacl.ts` 已接好：`probe()`→`win32/index.ts` `winaclProbe()`；进入 plan+readonly/verify 时 `createWinaclSession({cwd, profile, readState})`→`init`→每条 **pwsh** 命令经 `session.exec(command, cwd, {onData, signal, timeout, env})`；`isSpawnable()===false` 时 fail-closed 抛错（绝不无限制执行）。`registerSandbox` 用 `createPowerShellTool` 承载（win32 拉起 pi `powershell` 工具）。
 

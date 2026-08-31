@@ -21,6 +21,7 @@ Linux/WSL2 走 bwrap（命名空间），原生 Windows 走 winacl（受限令�
 - **计划文件即真源**：规划产物入 `.pi/plans/PLAN.md`（可 `/plan-file ./x.md` 改），无内存镜像；build 提示指向它作执行依据。
 - **安全档位**（`/plan-safety`）：OS 沙箱只在 `readonly`/`verify` 档强制；后端不可用自动降级 `supervised`（fail-closed，**决不无限制执行、不变弱**）。
 - **Windows 沙箱 shell = pwsh**：受限令牌 × git bash（MSYS2/Cygwin）固有不兼容（dsh/Codex 在 Windows 也用 pwsh/cmd）；winacl 档自动移除 `bash`、加入 `powershell`。
+- **winacl 由独立 Node 子进程承载**：pi 宿主是 Bun，加载不了 koffi（原生插件即崩），故 koffi/Win32 全在 `src/sandbox/win32/runner.ts`（Node 子进程）里执行，pi 侧仅经一条 IPC（`init`/`exec`/`dispose`，`kill` 经 AbortSignal 终止子进程）驱动——对齐 dsh runner / codex 原生二进制的「OS 沙箱 = 子进程」模式。
 - **docker 控制面 fail-closed**：只读子命令放行；写/未知拦截，防止经 unix-socket 绕过沙箱写面。
 
 ## 安全档位（`/plan-safety`）
@@ -82,10 +83,10 @@ pi-planbuild/
 │   ├── modes.ts        # 层0 工具可得性 + 状态条 + 提示/notice 注入
 │   ├── sandbox.ts      # 层1 编排：selectBackend + shellTool → createBashTool/createPowerShellTool
 │   ├── sandbox/
-│   │   ├── backend.ts  # SandboxBackend 抽象 + selectBackend
-│   │   ├── bwrap.ts    # bwrap（Linux）挂载/掩码/探测
-│   │   ├── winacl.ts   # winacl（Windows+pwsh）后端 + fail-closed 降级
-│   │   └── win32/      # Win32 原生 FFI seam（Phase 2，真实 Windows 交付）
+│   │   ├── backend.ts      # SandboxBackend 抽象 + selectBackend
+│   │   ├── bwrap.ts        # bwrap（Linux）挂载/掩码/探测
+│   │   ├── winacl.ts       # winacl（Windows+pwsh）后端：probe=spawnSync runner --probe；会话=runner IPC
+│   │   └── win32/          # Win32 FFI seam：koffi 在 Node 子进程 runner.ts 内跑（Bun 宿主不容）
 │   ├── gate.ts         # 层2 门控：supervised confirm / strict 拒绝 / docker 控制面
 │   ├── classify.ts     # 命令 读/写/未知 分类
 │   ├── docker-gate.ts  # docker 只读子命令白名单
@@ -109,11 +110,13 @@ npm run probe:winacl # winacl 自检（非 win32 跳过；真实 Windows 往返�
 pi -e ./index.ts     # 带扩展本地调试
 ```
 
-## Phase 2（需真实 Windows）
+## winacl 落地（Windows + Bun 已可用）
 
-`src/sandbox/win32/index.ts` 为 fail-closed seam：`winaclProbe()`（koffi 加载 + 建受限令牌 + **pwsh-under-token 冒烟**）通过才 `available=true`；否则 Windows readonly/verify 降级 supervised（安全不弱化）。落地步骤见 `src/sandbox/win32/README.md`。
+`src/sandbox/win32/` 为 fail-closed seam：`winaclProbe()`（koffi + 建受限令牌 + **pwsh-under-token 冒烟**）通过才 `available=true`；否则 Windows readonly/verify 降级 supervised（安全不弱化）。
+
+**关键：koffi 必须在独立 Node 子进程（`win32/runner.ts`）里跑**——pi 宿主是 Bun，加载 koffi（原生 N-API 插件）即 panic；Bun 的 `bun:ffi` 又读不了裸原生内存（ACL capture-restore / 幂等必需）。故 koffi/Win32 全在 runner（Node）内执行，pi 侧 `winacl.ts` 经一条极薄 IPC 驱动（`init`/`exec`/`dispose`；`kill` 经 AbortSignal → `terminateProcess`）。细节见 `src/sandbox/win32/README.md`。
 
 ## 依赖
 
-- `koffi`（optionalDependency，仅 winacl 运行时用；Win32 native FFI）
+- `koffi`（optionalDependency，仅 winacl 用，且只被 **Node 子进程 `win32/runner.ts`** 加载；Win32 native FFI）
 - peer：`@earendil-works/pi-coding-agent` 等（runtime ≥ 0.84.4；devDep 已锁 0.84.4）
