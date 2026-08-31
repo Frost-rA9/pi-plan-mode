@@ -6,10 +6,12 @@
  * 沙箱 shell = pwsh（受限令牌与 git bash 固有不兼容，v4 改用 pi 的 `powershell` 工具；与 dsh/Codex 一致）。
  * 四态自诊断：非 win32 跳过 / winaclProbe=false fail-closed / 会话未启用 / 可 spawn 安全往返断言。
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { createWinaclSession, winaclProbe, type WinaclSession } from "../src/sandbox/win32/index.ts";
+import { win32SensitivePaths } from "../src/config.ts";
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = ""): void {
@@ -29,7 +31,27 @@ async function run(
   return { code: res.exitCode };
 }
 
+/** 宿主（非受限）上下文执行：验证 dispose 后 ACL 恢复、宿主权限回归。 */
+function hostRun(command: string): number {
+  const r = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8" });
+  return r.status ?? -1;
+}
+
+/** 选一个真实存在、宿主可读的敏感**文件**（deny-read 目标；排除宿主必需 .pi/.config/.copilot）。 */
+function pickSensitivePath(): string | null {
+  const home = process.env.USERPROFILE ?? "";
+  const excluded = /[\./](?:\\.pi|\\.config|\\.copilot)$/i;
+  for (const p of win32SensitivePaths(home)) {
+    const norm = p.replaceAll("\\", "/");
+    if (excluded.test(norm)) continue;
+    if (existsSync(p) && statSync(p).isFile()) return p;
+  }
+  return null;
+}
+
 async function readOnlyRoundTrip(cwd: string): Promise<void> {
+  const sec = pickSensitivePath();
+  const hostBefore = sec !== null ? hostRun(getContent(sec)) : null;
   const session = createWinaclSession({ cwd, profile: "readonly", readState: () => undefined });
   await session.init("readonly");
   if (!session.isSpawnable()) {
@@ -40,10 +62,18 @@ async function readOnlyRoundTrip(cwd: string): Promise<void> {
   check("readonly · 写工作区被拒", w.code !== 0, `exit=${w.code}`);
   const t = await run(session, setContent(join(tmpdir(), "pb-probe-out.txt")));
   check("readonly · 写 temp 之外被拒（无写 SID）", t.code !== 0, `exit=${t.code}`);
-  const sec = join(process.env.USERPROFILE ?? "", ".ssh", "id_ed25519");
-  const r = await run(session, getContent(sec));
-  check("readonly · 敏感路径读被拒", r.code !== 0, `exit=${r.code}`);
+  if (sec !== null) {
+    check("readonly · 敏感路径宿主先读（前置条件）", hostBefore === 0, `exit=${hostBefore}`);
+    const r = await run(session, getContent(sec));
+    check("readonly · 敏感路径读被拒（真实拒绝）", r.code !== 0, `exit=${r.code}`);
+  } else {
+    console.log("  ⚠️  无真实敏感路径可测，跳过 deny-read 验证");
+  }
   await session.dispose();
+  if (sec !== null) {
+    const hostAfter = hostRun(getContent(sec));
+    check("readonly · dispose 后敏感路径宿主可读（恢复）", hostAfter === 0, `exit=${hostAfter}`);
+  }
 }
 
 async function verifyRoundTrip(cwd: string): Promise<void> {
@@ -60,12 +90,19 @@ async function verifyRoundTrip(cwd: string): Promise<void> {
   check("verify · .git 只读（写被拒）", g.code !== 0, `exit=${g.code}`);
   const p = await run(session, setContent(join(cwd, ".pi", "pb-probe-out.txt")));
   check("verify · .pi 只读（写被拒）", p.code !== 0, `exit=${p.code}`);
-  const sec = join(process.env.USERPROFILE ?? "", ".ssh", "id_ed25519");
-  const r = await run(session, getContent(sec));
-  check("verify · 敏感路径读被拒", r.code !== 0, `exit=${r.code}`);
+  // 私有 temp（verify 会话把子进程 TEMP 指向私有目录并授予写）可写。
+  const t = await run(session, `Set-Content -LiteralPath (Join-Path $env:TEMP 'pb-temp-out.txt') -Value 'x'`);
+  check("verify · 私有 temp 可写", t.code === 0, `exit=${t.code}`);
+  const sec = pickSensitivePath();
+  if (sec !== null) {
+    const r = await run(session, getContent(sec));
+    check("verify · 敏感路径读被拒（真实拒绝）", r.code !== 0, `exit=${r.code}`);
+  } else {
+    console.log("  ⚠️  无真实敏感路径可测，跳过 verify deny-read 验证");
+  }
   await session.dispose();
-  const after = await run(session, setContent(ws));
-  check("verify · dispose 后工作区写恢复宿主权限", after.code === 0, `exit=${after.code}`);
+  const after = hostRun(setContent(ws));
+  check("verify · dispose 后工作区写恢复宿主权限（宿主 pwsh）", after === 0, `exit=${after}`);
 }
 
 async function main(): Promise<void> {

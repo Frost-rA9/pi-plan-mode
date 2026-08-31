@@ -13,11 +13,15 @@
  * 实现：koffi（native FFI）；win32 模块在 ./win32/。非 win32 / 未自检 pass → available=false →
  * fail-closed 降级链（readonly/verify → supervised），决不无限制 spawn。
  */
+import { createRequire } from "node:module";
 import type { BashToolOptions } from "@earendil-works/pi-coding-agent";
 import { createLocalPowerShellOperations, type PowerShellOperations } from "@earendil-works/pi-coding-agent";
 import type { SandboxBackend, BackendContext } from "./backend.ts";
 import type { SandboxBackendInfo } from "../events.ts";
 import type { WinaclSession } from "./win32/index.ts";
+
+/** ESM 下惰性 require（win32 模块带 koffi，懒加载 + fail-closed）。 */
+const win32Require = createRequire(import.meta.url);
 
 export function winaclUsable(): boolean {
   return process.platform === "win32";
@@ -36,8 +40,7 @@ class WinaclBackend implements SandboxBackend {
       return false;
     }
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      this.info.available = Boolean(require("./win32/index.ts").winaclProbe());
+      this.info.available = Boolean(win32Require("./win32/index.ts").winaclProbe());
     } catch {
       this.info.available = false;
     }

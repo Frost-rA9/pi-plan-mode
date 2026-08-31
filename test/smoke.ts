@@ -15,6 +15,7 @@ import planbuildExtension from "../index.ts";
 import type { ExtensionAPI, ToolDefinition, AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { PB_ENTRY_TYPE, foldEvents, parsePbEvents } from "../src/events.ts";
 import { sandboxDecision, overrideBwrapDetect, buildBwrapCommand, detectDockerSocket, normalizeShellPath, detectShellPath, socketMaskFor } from "../src/sandbox/bwrap.ts";
+import { overrideWinaclProbe } from "../src/sandbox/win32/index.ts";
 import { selectBackend } from "../src/sandbox/backend.ts";
 import { shouldUsePowershellSandbox } from "../src/modes.ts";
 import { homedir } from "node:os";
@@ -178,7 +179,9 @@ ok("v4 路线X: selectBackend 按平台分流 shellTool + pwsh 沙箱档判定",
 ok("扩展注册：工具/命令/flag 齐全，默认 build 工具集", async () => {
   const m = mockPi();
   planbuildExtension(m.api);
-  for (const t of ["plan_file", "plan_mode_complete", "build_status", "ask_user_question", "bash"]) {
+  // 沙箱 shell 随平台：win32 → pwsh（winacl 移 bash 加 powershell）；其他 → bash（bwrap）。
+  const shellTool = process.platform === "win32" ? "powershell" : "bash";
+  for (const t of ["plan_file", "plan_mode_complete", "build_status", "ask_user_question", shellTool]) {
     assert.ok(m.tools.has(t), `缺少工具 ${t}`);
   }
   for (const c of ["plan", "build", "plan-safety", "plan-sandbox"]) {
@@ -232,17 +235,26 @@ ok("C1: 会话恢复 = getBranch 折叠（含 v3 blob 兼容）", () => {
   assert.deepEqual(folded.approveMemory.get("npm test"), true);
 });
 
-ok("C2: verify 档设置 + 无 bwrap 降级", async () => {
-  overrideBwrapDetect(() => true);
+ok("C2: verify 档设置 + 无可用后端降级", async () => {
+  const isWin = process.platform === "win32";
+  const setAvail = (v: boolean): void => {
+    // 沙箱后端随平台：win32→winacl；其他→bwrap。测试按实际后端覆盖其可用性。
+    if (isWin) overrideWinaclProbe(() => v);
+    else overrideBwrapDetect(() => v);
+  };
+  setAvail(true);
   const m2 = mockPi();
   planbuildExtension(m2.api);
   await m2.commands.get("plan-safety")!.handler("verify", ctxOf(m2));
   assert.ok(m2.entries.some((e) => { const d = e.data as { kind: string; value: string } | undefined; return d?.kind === "safety" && d.value === "verify"; }));
-  overrideBwrapDetect(() => false);
+  setAvail(false);
   const m3 = mockPi();
   planbuildExtension(m3.api);
   await m3.commands.get("plan-safety")!.handler("verify", ctxOf(m3));
   assert.ok(m3.ui.notifies.some((n) => n.includes("无法切换到该档位")));
+  // 恢复真实自检（win32 走已缓存结果，避免后续重跑 pwsh 冒烟）。
+  if (isWin) overrideWinaclProbe(undefined);
+  else overrideBwrapDetect(() => true);
 });
 
 ok("层 2 门控：readonly docker 拦截 / supervised confirm(grant) / strict 拒绝", async () => {
