@@ -190,6 +190,9 @@ ok("扩展注册：工具/命令/flag 齐全，默认 build 工具集", async ()
   for (const f of ["plan", "plan-safety", "plan-file", "plan-mount"]) {
     assert.ok(m.flags.has(f), `缺少 flag ${f}`);
   }
+  for (const s of ["ctrl+alt+p", "ctrl+alt+b"]) {
+    assert.ok(m.shortcuts.has(s), `缺少快捷键 ${s}`);
+  }
   // 默认 build：edit/write 可用
   assert.ok(m.activeTools.includes("edit"));
 });

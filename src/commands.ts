@@ -1,7 +1,7 @@
 /**
  * pi-planbuild v4 · 命令：/plan /build /plan-safety /plan-sandbox + 启动 flag（plan/plan-safety/plan-file/plan-mount）。
  */
-import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { PlanbuildStore } from "./state.ts";
 import type { ModeActions } from "./modes.ts";
 import { isSafetyMode, requiresSandbox, type SafetyMode } from "./events.ts";
@@ -14,45 +14,49 @@ const SAFETY_HELP =
   "  strict      无沙箱 + 只读集合放行 + 未知拒绝";
 
 export function registerCommands(pi: ExtensionAPI, store: PlanbuildStore, modes: ModeActions): void {
-  pi.registerCommand("plan", {
-    description: "切换到计划模式（只读规划；OS 沙箱后端可用时强制边界）",
-    handler: async (_args, ctx) => {
-      if (store.state.mode === "plan") {
-        ctx.ui.notify("当前已在计划模式", "info");
-        return;
-      }
-      // 进入前复核沙箱后端：不可用时自动降级
-      if (requiresSandbox(store.state.safetyMode) && !store.runtime.sandbox.available) {
-        store.setSafety("supervised");
-        ctx.ui.notify(
-          "未检测到可用的 OS 沙箱后端，安全档位自动降级为 supervised（未知命令需确认）。/plan-safety 可手动调整",
-          "info",
-        );
-      }
-      modes.enterPlanMode(ctx);
-      const sandboxed = isSandboxed(store.state.safetyMode) && store.runtime.sandbox.available;
-      const partial = sandboxed && store.runtime.sandbox.kind === "winacl";
+  async function enterPlan(ctx: ExtensionContext): Promise<void> {
+    if (store.state.mode === "plan") {
+      ctx.ui.notify("当前已在计划模式", "info");
+      return;
+    }
+    // 进入前复核沙箱后端：不可用时自动降级
+    if (requiresSandbox(store.state.safetyMode) && !store.runtime.sandbox.available) {
+      store.setSafety("supervised");
       ctx.ui.notify(
-        `计划模式已开启（安全档位: ${store.state.safetyMode}）。${sandboxed
-          ? store.state.safetyMode === "verify"
-            ? `bash 运行于 OS 沙箱（${store.runtime.sandbox.kind}）${partial ? "，enforcement=partial，弱于 bwrap" : ""}`
-            : `bash 运行于 OS 只读沙箱（${store.runtime.sandbox.kind}）${partial ? "，enforcement=partial，弱于 bwrap" : ""}`
-          : "写操作将拦截并引导切 build"}`,
+        "未检测到可用的 OS 沙箱后端，安全档位自动降级为 supervised（未知命令需确认）。/plan-safety 可手动调整",
         "info",
       );
-    },
+    }
+    modes.enterPlanMode(ctx);
+    const sandboxed = isSandboxed(store.state.safetyMode) && store.runtime.sandbox.available;
+    const partial = sandboxed && store.runtime.sandbox.kind === "winacl";
+    ctx.ui.notify(
+      `计划模式已开启（安全档位: ${store.state.safetyMode}）。${sandboxed
+        ? store.state.safetyMode === "verify"
+          ? `bash 运行于 OS 沙箱（${store.runtime.sandbox.kind}）${partial ? "，enforcement=partial，弱于 bwrap" : ""}`
+          : `bash 运行于 OS 只读沙箱（${store.runtime.sandbox.kind}）${partial ? "，enforcement=partial，弱于 bwrap" : ""}`
+        : "写操作将拦截并引导切 build"}`,
+      "info",
+    );
+  }
+
+  async function enterBuild(ctx: ExtensionContext): Promise<void> {
+    if (store.state.mode === "build") {
+      ctx.ui.notify("当前已在构建模式", "info");
+      return;
+    }
+    modes.enterBuildMode(ctx);
+    ctx.ui.notify("构建模式已开启（完整工具权限）", "info");
+  }
+
+  pi.registerCommand("plan", {
+    description: "切换到计划模式（只读规划；OS 沙箱后端可用时强制边界）",
+    handler: async (_args, ctx) => enterPlan(ctx),
   });
 
   pi.registerCommand("build", {
     description: "切换到构建模式（完整工具权限）；纯切换，不注入计划内容",
-    handler: async (_args, ctx) => {
-      if (store.state.mode === "build") {
-        ctx.ui.notify("当前已在构建模式", "info");
-        return;
-      }
-      modes.enterBuildMode(ctx);
-      ctx.ui.notify("构建模式已开启（完整工具权限）", "info");
-    },
+    handler: async (_args, ctx) => enterBuild(ctx),
   });
 
   pi.registerCommand("plan-safety", {
@@ -134,6 +138,16 @@ export function registerCommands(pi: ExtensionAPI, store: PlanbuildStore, modes:
   pi.registerFlag("plan-mount", {
     description: "沙箱附加只读挂载路径（逗号分隔，如 ~/data,/mnt/d）",
     type: "string",
+  });
+
+  /* ------------------------ 快切按键（与 /plan /build 同逻辑） ------------------------ */
+  pi.registerShortcut("ctrl+alt+p", {
+    description: "切换到计划模式（只读规划）",
+    handler: enterPlan,
+  });
+  pi.registerShortcut("ctrl+alt+b", {
+    description: "切换到构建模式（完整工具权限）",
+    handler: enterBuild,
   });
 }
 
