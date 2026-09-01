@@ -31,7 +31,7 @@ export default async function planModeExtension(pi: ExtensionAPI): Promise<void>
     extraTools: cap.question ? ["ask_user_question"] : [],
   });
   registerTools(pi, store, modes, cap.preview);
-  registerSandbox(pi, store, cap.sandbox);
+  registerSandbox(pi, store, cap.sandbox, cap.errors.sandbox);
   registerGate(pi, store);
   registerCommands(pi, store, modes, cap);
   if (cap.question) cap.question.registerQuestionTool(pi);
@@ -56,9 +56,10 @@ export default async function planModeExtension(pi: ExtensionAPI): Promise<void>
       store.overrideLocal({ sandboxExtras: flagMount.split(",").map((x) => x.trim()).filter(Boolean) });
     }
 
-    // 沙箱后端不可用时降级档位
+    // 沙箱后端不可用时**运行时**降级（只改缓存不落日志——档位 = 用户显式设置的真源，
+    // 沙箱可用性为运行时事实；落日志会把 supervised 粘进恢复折叠，默认 readonly 被覆盖）
     if (requiresSandbox(store.state.safetyMode) && !store.runtime.sandbox.available) {
-      store.setSafety("supervised");
+      store.state.safetyMode = "supervised";
     }
 
     if (store.state.mode === "plan") {

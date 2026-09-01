@@ -103,8 +103,8 @@ export function registerModes(
     store.runtime.notifiedMode = primeNoticeBaseline(store.runtime.notifiedMode, oldMode);
     store.state.mode = "plan";
     if (isSandboxedProfile(store.state.safetyMode) && !store.runtime.sandbox.available) {
+      // 运行时降级（不落日志，无粘性）：档位真源保持用户设置（默认 readonly）
       store.state.safetyMode = "supervised";
-      if (persist) store.setSafety("supervised");
     }
     if (store.runtime.toolsBeforePlanMode === undefined) {
       store.runtime.toolsBeforePlanMode = pi.getActiveTools();
