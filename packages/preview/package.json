@@ -1,0 +1,31 @@
+{
+  "name": "pi-plan-preview",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "plan 预览库：启发式摘要（首个标题 + 要点前 N 条 + 步骤数/行数），实现 pi-plan-bridge 的 PlanPreviewRenderer。被 pi-plan-mode import（route A：能力库注入）。",
+  "keywords": [
+    "pi-package",
+    "pi-plan"
+  ],
+  "license": "MIT",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types test/preview.spec.ts"
+  },
+  "dependencies": {
+    "pi-plan-bridge": "file:../bridge"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.4",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "name": "pi-plan-sandbox",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "OS 沙箱能力（library）：bwrap（Linux/WSL2）、winacl（Windows 受限令牌 + NTFS ACE，shell=pwsh）、Win32 FFI（koffi 在 Node 子进程 runner）。供 pi-plan-mode import，提供后端（probe/shellTool/createToolOptions + 纯 builder）。可插拔=换 sandbox 包。fail-closed。",
+  "keywords": [
+    "pi-package",
+    "pi-plan"
+  ],
+  "license": "MIT",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types test/sandbox.spec.ts"
+  },
+  "dependencies": {
+    "pi-plan-bridge": "file:../bridge"
+  },
+  "optionalDependencies": {
+    "koffi": "^3.1.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.4",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3"
+  }
+}

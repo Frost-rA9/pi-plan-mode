@@ -1,0 +1,33 @@
+{
+  "name": "pi-plan-question",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "结构化澄清库：ask_user_question 核心逻辑（多问题、各 2-4 互斥选项、标推荐项、含「其他（自行输入）」自由文本）+ registerQuestionTool。被 pi-plan-mode import（route A：能力库注入）。",
+  "keywords": [
+    "pi-package",
+    "pi-plan"
+  ],
+  "license": "MIT",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types test/question.spec.ts"
+  },
+  "dependencies": {
+    "pi-plan-bridge": "file:../bridge"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.4",
+    "@types/node": "^24.0.0",
+    "typebox": "^1.0.0",
+    "typescript": "^5.9.3"
+  }
+}

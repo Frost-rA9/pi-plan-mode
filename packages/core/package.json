@@ -1,0 +1,38 @@
+{
+  "name": "pi-plan-core",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "plan/build 双模式核心：log 折叠状态、模式切换、计划文件、批准契约（plan_mode_complete）、模式条/提示。经 pi-plan-bridge 调用 sandbox/preview/question 能力。",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi-plan"
+  ],
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types test/mode.spec.ts"
+  },
+  "dependencies": {
+    "pi-plan-bridge": "file:../bridge",
+    "pi-plan-sandbox": "file:../sandbox",
+    "pi-plan-preview": "file:../preview",
+    "pi-plan-question": "file:../question"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.4",
+    "@types/node": "^24.0.0",
+    "typebox": "^1.0.0",
+    "typescript": "^5.9.3"
+  }
+}
