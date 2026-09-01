@@ -13,6 +13,7 @@ import { registerSandbox } from "./sandbox.ts";
 import { registerGate } from "./gate.ts";
 import { registerCommands } from "./commands.ts";
 import { registerTools } from "./tools.ts";
+import { registerPlanPreviewRenderer } from "./preview.ts";
 import { loadCapabilities } from "./capabilities.ts";
 
 export default async function planModeExtension(pi: ExtensionAPI): Promise<void> {
@@ -31,6 +32,7 @@ export default async function planModeExtension(pi: ExtensionAPI): Promise<void>
     extraTools: cap.question ? ["ask_user_question"] : [],
   });
   registerTools(pi, store, modes, cap.preview);
+  registerPlanPreviewRenderer(pi);
   registerSandbox(pi, store, cap.sandbox, cap.errors.sandbox);
   registerGate(pi, store);
   registerCommands(pi, store, modes, cap);

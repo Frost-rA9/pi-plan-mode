@@ -30,8 +30,8 @@ assert.equal(classifyDockerWrite("docker exec foo"), true); // 未知 → fail-c
 assert.equal(classifyDockerWrite("docker"), true);
 
 const fmt = formatPlanSummary({ title: "计划", bullets: ["a", "b"], steps: 2, lines: 4 });
-assert.ok(fmt.includes("目标：计划"));
-assert.ok(fmt.includes("· a"));
+assert.ok(fmt.includes("## 目标：计划"));
+assert.ok(fmt.includes("- a"));
 assert.ok(fmt.includes("2 步 / 4 行"));
 
 console.log("✅ bridge: classifyDockerWrite / safety / formatPlanSummary");

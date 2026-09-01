@@ -12,6 +12,7 @@ import { formatPlanSummary, type PlanSummary, type PlanReviewChoice } from "pi-p
 import type { PlanbuildStore } from "./state.ts";
 import type { ModeActions } from "./modes.ts";
 import type { PreviewApi } from "./capabilities.ts";
+import { buildPreviewMarkdown, emitPlanPreview } from "./preview.ts";
 import { readPlanFile, writePlanFile, isAllowedPlanPath, resolvePlanFilePath } from "./utils.ts";
 
 /** 工具结果统一为 AgentToolResult 形状（content 数组 + details） */
@@ -72,15 +73,17 @@ export function registerTools(
     parameters: Type.Object({ plan: Type.String() }),
     execute: async (_id, params, _signal, _onUpdate, ctx: ExtensionContext) => {
       const target = resolvePlanFilePath(undefined, ctx.cwd, store.state.planFilePath);
-      // 预览：经能力注册取 previewApi（可选库）；缺席降级截断。
+      // 预览：经能力注册取 previewApi（可选库）；缺席降级截断原文。
+      // 形态：预览以 markdown 渲染到**消息区**（appendEntry：TUI-only，不进 LLM 上下文，
+      // 不变量 4）；select 只保留简短标题，长摘要不再塞进选择区。
       const summary: PlanSummary | undefined = previewApi ? previewApi.summarize(params.plan) : undefined;
-      const display = summary
-        ? formatPlanSummary(summary)
-        : params.plan.length > 150
-          ? `${params.plan.slice(0, 147)}…`
-          : params.plan || "（空计划）";
+      const previewMarkdown = buildPreviewMarkdown(
+        summary ? formatPlanSummary(summary) : undefined,
+        params.plan,
+      );
+      emitPlanPreview(pi, previewMarkdown);
 
-      const choice = await ctx.ui.select(`提交计划？\n${display}`, ["批准并执行", "继续规划"]);
+      const choice = await ctx.ui.select("提交计划？（完整预览已显示于消息区）", ["批准并执行", "继续规划"]);
       const decision: PlanReviewChoice =
         choice === "批准并执行" ? "approve" : choice === "继续规划" ? "continue" : undefined;
 

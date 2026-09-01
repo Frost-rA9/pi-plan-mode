@@ -77,10 +77,10 @@ export interface PlanSummary {
   lines: number;
 }
 
-/** 把 PlanSummary 格式化为多行文本（mode 可放进 select 标题）。 */
+/** 把 PlanSummary 格式化为 markdown（渲染到消息区的计划预览，标题/要点/统计）。 */
 export function formatPlanSummary(s: PlanSummary): string {
-  const head = s.title ? `目标：${s.title}` : "（计划）";
-  const parts = [head, ...s.bullets.map((b) => `· ${b}`), `${s.steps} 步 / ${s.lines} 行`];
+  const head = s.title ? `## 目标：${s.title}` : "## 计划";
+  const parts = [head, ...s.bullets.map((b) => `- ${b}`), `*${s.steps} 步 / ${s.lines} 行*`];
   return parts.filter(Boolean).join("\n");
 }
 

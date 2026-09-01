@@ -36,7 +36,7 @@ pi --plan-capabilities-question=my-ask  # 替换 question 实现
 | 工具 | 来自 | 作用 |
 |---|---|---|
 | `plan_file` | mode | 读写当前计划文件（唯一真源；仅 `.pi/plans` 或 `/plan-file`） |
-| `plan_mode_complete` | mode | 提交计划：**预览（preview 摘要）+ 批准/继续/dismissed** |
+| `plan_mode_complete` | mode | 提交计划：预览**以 markdown 渲染到消息区**（appendEntry，不进 LLM 上下文）+ 批准/继续/dismissed |
 | `build_status` | mode | 查询当前模式（plan / build） |
 | `ask_user_question` | question（能力） | 结构化澄清（recommended + 其他自由输入） |
 

@@ -5,6 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { shouldUsePowershellSandbox, shouldInjectModeNotice, modeNoticeContent, primeNoticeBaseline } from "../src/modes.ts";
+import { buildPreviewMarkdown, PREVIEW_MAX_CHARS } from "../src/preview.ts";
 import { classifyBash, scanPipeline } from "../src/classify.ts";
 import { foldEvents, parsePbEvents, PB_ENTRY_TYPE, emptyState } from "../src/events.ts";
 
@@ -101,6 +102,21 @@ assert.equal(n3, "plan");
 assert.equal(shouldInjectModeNotice("build", n3), true); // 下一回合（build）注入 ✅
 n3 = "build";
 assert.equal(shouldInjectModeNotice("build", n3), false); // 再下回合防抖
+
+/* -------------------- 计划预览消息区条目（buildPreviewMarkdown 纯函数） -------------------- */
+
+// 摘要优先
+assert.equal(buildPreviewMarkdown("## 目标：计划", "原文..."), "## 目标：计划");
+// 无预览能力 → 降级说明 + 原文（短文不截断）
+assert.equal(buildPreviewMarkdown(undefined, "短计划"), "> 预览能力未启用，已截断原文（3 字符）。完整计划在工具结果/计划文件中。\n\n短计划");
+// 无预览能力 + 超长 → 截断到 PREVIEW_MAX_CHARS + 省略号
+{
+  const long = "x".repeat(PREVIEW_MAX_CHARS + 100);
+  const out = buildPreviewMarkdown(undefined, long);
+  assert.ok(out.includes("…"));
+  assert.ok(!out.includes("x".repeat(PREVIEW_MAX_CHARS + 1)));
+  assert.ok(out.endsWith("…"));
+}
 assert.equal(modeNoticeContent("build"), "用户已将模式切换到构建模式（完整权限）。");
 
 console.log("✅ mode: shouldUsePowershellSandbox / classifyBash / foldEvents / parsePbEvents / notice");
