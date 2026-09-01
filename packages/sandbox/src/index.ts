@@ -34,13 +34,10 @@ export {
   type SandboxDecisionState,
 } from "./bwrap.ts";
 export { winaclUsable, createWinaclBackend } from "./winacl.ts";
-export {
-  winaclProbe,
-  overrideWinaclProbe,
-  createWinaclSession,
-  type WinaclSession,
-  type WinaclSessionOptions,
-} from "./win32/index.ts";
+// 注意：**不**顶层 re-export win32/ 运行时符号——win32/index.ts（koffi 绑定 + struct 全局注册）
+// 只能由独立 Node runner 子进程（win32/runner.ts）或在 Windows 上按需加载；
+// 任何平台经 sandbox 包入口加载 win32/ 都会执行 koffi.struct 注册，jiti 双重加载即抛
+// 「Duplicate type name」（PIB_STARTUPINFOW）→ import("pi-plan-sandbox") 失败 → 能力整体降级。
 
 // 安全清单（bwrap/winacl 内部的敏感路径定义；mode 不需 import）
 export {

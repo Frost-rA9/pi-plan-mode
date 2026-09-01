@@ -12,8 +12,57 @@ declare const nativePtr: unique symbol;
 export type NativePtr = bigint & { readonly [nativePtr]: true };
 
 type Ptr = ReturnType<typeof koffi.pointer>;
-const PVOID: Ptr = koffi.pointer("void");
-const PPVOID: Ptr = koffi.pointer(PVOID);
+type KoffiStruct = ReturnType<typeof koffi.struct>;
+
+// koffi 类型注册是**全局命名表**：同名字（PIB_STARTUPINFOW 等）二次注册即抛「Duplicate type name」。
+// jiti/loader 下模块可能被多次加载，顶层直接注册会崩；故统一惰性注册（ensureTypes 幂等），
+// 且 win32 原语只在真正使用（bindings 调用 / Windows 自检 / runner 子进程）时才注册。
+let PVOID!: Ptr;
+let PPVOID!: Ptr;
+let STARTUPINFOW!: KoffiStruct;
+let PROCESS_INFORMATION!: KoffiStruct;
+let typesEnsured = false;
+
+function ensureTypes(): void {
+  if (typesEnsured) return;
+  typesEnsured = true;
+  PVOID = koffi.pointer("void");
+  PPVOID = koffi.pointer(PVOID);
+  STARTUPINFOW = koffi.struct("PIB_STARTUPINFOW", {
+    cb: "uint32",
+    lpReserved: "str16",
+    lpDesktop: "str16",
+    lpTitle: "str16",
+    dwX: "uint32",
+    dwY: "uint32",
+    dwXSize: "uint32",
+    dwYSize: "uint32",
+    dwXCountChars: "uint32",
+    dwYCountChars: "uint32",
+    dwFillAttribute: "uint32",
+    dwFlags: "uint32",
+    wShowWindow: "uint16",
+    cbReserved2: "uint16",
+    lpReserved2: koffi.pointer("uint8"),
+    hStdInput: PVOID,
+    hStdOutput: PVOID,
+    hStdError: PVOID,
+  });
+  PROCESS_INFORMATION = koffi.struct("PIB_PROCESS_INFORMATION", {
+    hProcess: PVOID,
+    hThread: PVOID,
+    dwProcessId: "uint32",
+    dwThreadId: "uint32",
+  });
+  /* v8 ignore start -- ABI 守卫由原生头探针固定。 */
+  if (STARTUPINFOW.size !== abi.STARTUPINFOW_SIZE) {
+    throw new Error(`STARTUPINFOW layout mismatch: koffi computed ${STARTUPINFOW.size}, expected ${abi.STARTUPINFOW_SIZE}`);
+  }
+  if (PROCESS_INFORMATION.size !== abi.PROCESS_INFORMATION_SIZE) {
+    throw new Error(`PROCESS_INFORMATION layout mismatch: koffi computed ${PROCESS_INFORMATION.size}, expected ${abi.PROCESS_INFORMATION_SIZE}`);
+  }
+  /* v8 ignore stop */
+}
 
 /* ------------------------------ 错误 ------------------------------ */
 
@@ -49,44 +98,8 @@ export interface ProcessInfoOutput {
   dwThreadId: number;
 }
 
-/** koffi STARTUPINFOW 布局（x64，原生探针验证）。 */
-export const STARTUPINFOW = koffi.struct("PIB_STARTUPINFOW", {
-  cb: "uint32",
-  lpReserved: "str16",
-  lpDesktop: "str16",
-  lpTitle: "str16",
-  dwX: "uint32",
-  dwY: "uint32",
-  dwXSize: "uint32",
-  dwYSize: "uint32",
-  dwXCountChars: "uint32",
-  dwYCountChars: "uint32",
-  dwFillAttribute: "uint32",
-  dwFlags: "uint32",
-  wShowWindow: "uint16",
-  cbReserved2: "uint16",
-  lpReserved2: koffi.pointer("uint8"),
-  hStdInput: PVOID,
-  hStdOutput: PVOID,
-  hStdError: PVOID,
-});
-
-/** koffi PROCESS_INFORMATION 布局（x64）。 */
-export const PROCESS_INFORMATION = koffi.struct("PIB_PROCESS_INFORMATION", {
-  hProcess: PVOID,
-  hThread: PVOID,
-  dwProcessId: "uint32",
-  dwThreadId: "uint32",
-});
-
-/* v8 ignore start -- ABI 守卫由原生头探针固定。 */
-if (STARTUPINFOW.size !== abi.STARTUPINFOW_SIZE) {
-  throw new Error(`STARTUPINFOW layout mismatch: koffi computed ${STARTUPINFOW.size}, expected ${abi.STARTUPINFOW_SIZE}`);
-}
-if (PROCESS_INFORMATION.size !== abi.PROCESS_INFORMATION_SIZE) {
-  throw new Error(`PROCESS_INFORMATION layout mismatch: koffi computed ${PROCESS_INFORMATION.size}, expected ${abi.PROCESS_INFORMATION_SIZE}`);
-}
-/* v8 ignore stop */
+/** koffi STARTUPINFOW 布局（x64，原生探针验证）。参见 ensureTypes() 惰性注册。 */
+/** koffi PROCESS_INFORMATION 布局（x64）。参见 ensureTypes() 惰性注册。 */
 
 /* ------------------------------ 绑定表接口 ------------------------------ */
 
@@ -372,6 +385,7 @@ let cached: Win32Bindings | undefined;
 
 function bindings(): Win32Bindings {
   if (cached !== undefined) return cached;
+  ensureTypes();
   const kernel32 = koffi.load("kernel32.dll");
   const advapi32 = koffi.load("advapi32.dll");
   const bind = (lib: ReturnType<typeof koffi.load>, name: string, result: Ptr | string, args: Array<Ptr | string>): unknown =>
