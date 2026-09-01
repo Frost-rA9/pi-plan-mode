@@ -13,7 +13,7 @@
   ],
   "pi": {
     "extensions": [
-      "./packages/core/src/index.ts"
+      "./index.ts"
     ]
   },
   "scripts": {

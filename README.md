@@ -14,7 +14,7 @@ preview   计划预览库：启发式摘要（首标题 + 要点前 N 条 + 步�
 question  结构化澄清库：ask_user_question（recommended + 「其他」自由文本）。被 core import
 ```
 
-根 `package.json` 的 `pi.extensions` 指向 `./packages/core/src/index.ts`（唯一扩展入口）；`workspaces: ["packages/*"]`。
+根 `package.json` 的 `pi.extensions` 指向 `./index.ts`（包根 re-export 入口，加载 `packages/core/src/index.ts`；包根入口保证 /config 显示名为 `pi-plan-mode/index.ts`，与 pi-mcp-bridge 同构）；`workspaces: ["packages/*"]`。
 
 ## 能力：按需启用 / 替换
 
