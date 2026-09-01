@@ -1,15 +1,15 @@
-# pi-planbuild
+# pi-plan-mode
 
-[Pi](https://pi.dev) 的 **plan/build 双模式扩展**（monorepo，workspaces）：单一宿主（`pi-plan-mode` 扩展）+ 可插拔能力库。
+[Pi](https://pi.dev) 的 **plan/build 双模式扩展**（monorepo，workspaces）：单一宿主 + 可插拔能力库。
 
 > 架构（Route A）：**一个宿主 + 能力库**，所有能力经 `import` 注入，插拔方式一致。可**按需启用**（`plan-capabilities`）与**替换**（`plan-capabilities-<id>`）。
 
 ## 包结构（`packages/*`）
 
 ```text
-bridge    契约：类型 + 能力接口（SafetyProvider / PlanPreviewRenderer / QuestionAsker）+ 共享纯函数（含 classifyDockerWrite）
-core      唯一 pi 扩展（包名 `pi-plan-mode`）：状态折叠/模式切换/plan_file/plan_mode_complete/build_status/命令/gate + 能力注册
-sandbox   OS 沙箱库：bwrap（Linux/WSL2）、winacl（Windows 受限令牌 + NTFS ACE，shell=pwsh）。被 core import
+bridge    契约：类型 + 能力接口（SafetyProvider / PlanPreviewRenderer / QuestionAsker）+ 共享纯函数（classifyDockerWrite、formatPlanSummary…）
+core      唯一 pi 扩展（workspace 包名 `pi-plan-core`，扩展显示名 `pi-plan-mode`）：状态折叠/模式切换/plan_file/plan_mode_complete/build_status/命令/gate + 能力注册
+sandbox   OS 沙箱库：bwrap（Linux/WSL2）、winacl（Windows 受限令牌 + NTFS ACE，shell=pwsh，win32/ FFI）。被 core import
 preview   计划预览库：启发式摘要（首标题 + 要点前 N 条 + 步骤数/行数）。被 core import
 question  结构化澄清库：ask_user_question（recommended + 「其他」自由文本）。被 core import
 ```
@@ -42,16 +42,17 @@ pi --plan-capabilities-question=my-ask  # 替换 question 实现
 
 ## 行为速览
 
-- **双模式**：plan（只读，移除 `edit`/`write`；模型不能自切）→ build（完整权限）。
+- **双模式**：plan（只读，移除 `edit`/`write`；模型不能自切）→ build（完整权限）。切换：`/plan` `/build` 或 Ctrl+Alt+P/B。
 - **计划文件即真源**：规划产物入 `.pi/plans/PLAN.md`，无内存镜像。
 - **批准三分支**：批准并执行（写计划文件 + 切 build）/ 继续规划 / `dismissed`（ESC = 留 plan 等指示）。
 - **安全档位**（`/plan-safety`）：`readonly`（默认，OS 只读沙箱）/ `verify`（工作区可写）/ `supervised`（无沙箱+confirm）/ `strict`（无沙箱+拒绝）。沙箱不可用自动降级 `supervised`（fail-closed，决不无限制执行）。
+- **沙箱挂载**（`/plan-sandbox`）：查看/更新沙箱额外挂载与掩码。
 
 ## 安装 / 本地调试
 
 ```sh
-pi install git:github.com/Frost-rA9/pi-planbuild
-# 本仓位于 ~/projects/pi-extensions/pi-planbuild → pi install "~/projects/pi-extensions/pi-planbuild"
+pi install git:github.com/Frost-rA9/pi-plan-mode
+# 本仓位于 ~/projects/pi-extensions/pi-plan-mode → pi install "~/projects/pi-extensions/pi-plan-mode"
 # 本地：直接在本仓（settings.json 的 packages 指向它），改代码后 /reload
 ```
 
