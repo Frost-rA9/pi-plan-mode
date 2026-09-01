@@ -6,7 +6,7 @@
  * - 严格切换：仅用户 /build / Ctrl+Alt+B；模型不能自行切换模式（四家共识 + pi「打断 = 用户决策点」）。
  */
 import { isToolCallEventType, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { isSandboxedProfile } from "pi-plan-bridge";
+import { isSandboxedProfile, type Mode } from "pi-plan-bridge";
 import { type SafetyMode, type SandboxShellTool, PB_ENTRY_TYPE } from "./events.ts";
 import type { PlanbuildStore } from "./state.ts";
 import { resolvePlanFilePath } from "./utils.ts";
@@ -36,6 +36,29 @@ export function shouldUsePowershellSandbox(d: PowershellSandboxDecision): boolea
   );
 }
 
+/* -------------------- 模式切换 notice（纯函数，可单测） -------------------- */
+
+/** notice 判定：仅当已建立基线（notifiedMode 存在）且与当前模式不同 → 注入 */
+export function shouldInjectModeNotice(mode: Mode, notifiedMode: Mode | undefined): boolean {
+  return notifiedMode !== undefined && notifiedMode !== mode;
+}
+
+/** 模式切换 notice 文案（与 TUI 展示一致） */
+export function modeNoticeContent(mode: Mode): string {
+  return mode === "plan"
+    ? "用户已将模式切换到计划模式（只读规划）。"
+    : "用户已将模式切换到构建模式（完整权限）。";
+}
+
+/**
+ * 未对话时切换补基线：notifiedMode 未建立（undefined）→ 用切换前模式建立基线。
+ * 覆盖：启动默认 build 未对话先 /plan、/resume 恢复模式后未对话先切换——
+ * 否则首回合 before_agent_start 因 last===undefined 跳过，真实切换永不告知。
+ */
+export function primeNoticeBaseline(notifiedMode: Mode | undefined, oldMode: Mode): Mode {
+  return notifiedMode ?? oldMode;
+}
+
 export interface ModeActions {
   enterPlanMode(ctx: ExtensionContext, persist?: boolean): void;
   enterBuildMode(ctx: ExtensionContext, persist?: boolean): void;
@@ -62,6 +85,8 @@ export function registerModes(
   }
 
   function enterBuildMode(ctx: ExtensionContext, persist = true): void {
+    const oldMode = store.state.mode;
+    store.runtime.notifiedMode = primeNoticeBaseline(store.runtime.notifiedMode, oldMode);
     store.state.mode = "build";
     const restored = unique([
       ...(store.runtime.toolsBeforePlanMode ?? pi.getActiveTools()),
@@ -74,6 +99,8 @@ export function registerModes(
   }
 
   function enterPlanMode(ctx: ExtensionContext, persist = true): void {
+    const oldMode = store.state.mode;
+    store.runtime.notifiedMode = primeNoticeBaseline(store.runtime.notifiedMode, oldMode);
     store.state.mode = "plan";
     if (isSandboxedProfile(store.state.safetyMode) && !store.runtime.sandbox.available) {
       store.state.safetyMode = "supervised";
@@ -121,13 +148,10 @@ export function registerModes(
     } = { systemPrompt: event.systemPrompt + "\n\n" + content };
 
     const last = store.runtime.notifiedMode;
-    if (last !== undefined && last !== store.state.mode) {
+    if (shouldInjectModeNotice(store.state.mode, last)) {
       result.message = {
         customType: `${PB_ENTRY_TYPE}:mode-notice`,
-        content:
-          store.state.mode === "plan"
-            ? "用户已将模式切换到计划模式（只读规划）。"
-            : "用户已将模式切换到构建模式（完整权限）。",
+        content: modeNoticeContent(store.state.mode),
         display: true,
       };
     }

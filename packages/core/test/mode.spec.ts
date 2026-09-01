@@ -4,7 +4,7 @@
  * 运行：node --experimental-strip-types test/mode.spec.ts
  */
 import assert from "node:assert/strict";
-import { shouldUsePowershellSandbox } from "../src/modes.ts";
+import { shouldUsePowershellSandbox, shouldInjectModeNotice, modeNoticeContent, primeNoticeBaseline } from "../src/modes.ts";
 import { classifyBash, scanPipeline } from "../src/classify.ts";
 import { foldEvents, parsePbEvents, PB_ENTRY_TYPE, emptyState } from "../src/events.ts";
 
@@ -61,4 +61,46 @@ assert.equal("mode" in v3[0] && v3[0].mode, "plan");
 assert.equal(emptyState().mode, "build");
 assert.equal(emptyState().safetyMode, "readonly");
 
-console.log("✅ mode: shouldUsePowershellSandbox / classifyBash / foldEvents / parsePbEvents");
+/* -------------------- 模式切换 notice（修复：首回合前切换补基线） -------------------- */
+
+// 判定：未建立基线（首回合）不注入；不同模式才注入；同模式防抖
+assert.equal(shouldInjectModeNotice("plan", undefined), false);
+assert.equal(shouldInjectModeNotice("build", "plan"), true);
+assert.equal(shouldInjectModeNotice("plan", "plan"), false);
+assert.equal(shouldInjectModeNotice("plan", "build"), true);
+
+// 文案与 TUI 展示一致
+assert.equal(modeNoticeContent("plan"), "用户已将模式切换到计划模式（只读规划）。");
+assert.equal(modeNoticeContent("build"), "用户已将模式切换到构建模式（完整权限）。");
+
+// 补基线：未对话切换 → 旧模式成为基线；已对话不覆盖
+assert.equal(primeNoticeBaseline(undefined, "build"), "build"); // 场景 1：启动默认 build，未对话 /plan
+assert.equal(primeNoticeBaseline(undefined, "plan"), "plan"); // 场景 2：恢复 plan，未对话 /build
+assert.equal(primeNoticeBaseline("plan", "build"), "plan"); // 已对话后切换：基线不动
+
+// —— 场景 1 全序列：启动默认 build → 未对话 /plan → 首回合注入 → 次回合防抖 ——
+let n1: "plan" | "build" | undefined = undefined;
+n1 = primeNoticeBaseline(n1, "build"); // /plan 切换时补基线
+assert.equal(shouldInjectModeNotice("plan", n1), true); // 首回合注入 ✅（修复前为 false）
+n1 = "plan"; // before_agent_start 写入
+assert.equal(shouldInjectModeNotice("plan", n1), false); // 次回合防抖
+
+// —— 场景 2 全序列：/resume 恢复 plan → 未对话 /build → 首回合注入 ——
+let n2: "plan" | "build" | undefined = undefined;
+n2 = primeNoticeBaseline(n2, "plan"); // /build 切换时补基线（oldMode=恢复的 plan）
+assert.equal(shouldInjectModeNotice("build", n2), true); // 首回合注入 ✅
+
+// —— 场景 3（T4）序列：启动默认 build → 未对话 /plan（基线=build）→ 首回合（plan）注入 →
+//    回合中 plan_mode_complete 批准切 build（基线不动）→ 下一回合（build）注入 → 再下回合防抖 ——
+let n3: "plan" | "build" | undefined = undefined;
+n3 = primeNoticeBaseline(n3, "build"); // 启动默认 build，未对话 /plan
+assert.equal(shouldInjectModeNotice("plan", n3), true); // 首回合（plan）注入：已切到 plan
+n3 = "plan"; // before_agent_start 写入
+n3 = primeNoticeBaseline(n3, "plan"); // 回合中批准 → enterBuildMode：已有值不动
+assert.equal(n3, "plan");
+assert.equal(shouldInjectModeNotice("build", n3), true); // 下一回合（build）注入 ✅
+n3 = "build";
+assert.equal(shouldInjectModeNotice("build", n3), false); // 再下回合防抖
+assert.equal(modeNoticeContent("build"), "用户已将模式切换到构建模式（完整权限）。");
+
+console.log("✅ mode: shouldUsePowershellSandbox / classifyBash / foldEvents / parsePbEvents / notice");
