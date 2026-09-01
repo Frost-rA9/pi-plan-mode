@@ -5,8 +5,7 @@ import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-cod
 import { isSafetyMode, requiresSandbox, type SafetyMode, type CapabilityId } from "pi-plan-bridge";
 import type { PlanbuildStore } from "./state.ts";
 import type { ModeActions } from "./modes.ts";
-import type { CapabilityRegistry } from "./capabilities.ts";
-import { parseEnabled } from "./capabilities.ts";
+import { parseEnabled, type LoadedCapabilities } from "./capabilities.ts";
 
 const SAFETY_HELP =
   "档位含义：\n" +
@@ -19,7 +18,7 @@ export function registerCommands(
   pi: ExtensionAPI,
   store: PlanbuildStore,
   modes: ModeActions,
-  cap: CapabilityRegistry,
+  cap: LoadedCapabilities,
 ): void {
   async function enterPlan(ctx: ExtensionContext): Promise<void> {
     if (store.state.mode === "plan") {
@@ -71,7 +70,8 @@ export function registerCommands(
     handler: async (args, ctx) => {
       if (!args?.trim()) {
         ctx.ui.notify(
-          `当前安全档位: ${store.state.safetyMode}（OS 沙箱可用: ${store.runtime.sandbox.available ? "是" : "否"}）\n${SAFETY_HELP}`,
+          `当前安全档位: ${store.state.safetyMode}（OS 沙箱可用: ${store.runtime.sandbox.available ? "是" : "否"}）` +
+            `${store.runtime.sandboxError ? `\n沙箱原因: ${store.runtime.sandboxError}` : ""}\n${SAFETY_HELP}`,
           "info",
         );
         return;
@@ -81,9 +81,22 @@ export function registerCommands(
         ctx.ui.notify(`无效值: ${args.trim()}。可选值: readonly / verify / supervised / strict`, "error");
         return;
       }
-      if (requiresSandbox(value) && !store.runtime.sandbox.available) {
-        ctx.ui.notify("无法切换到该档位：未检测到可用的 OS 沙箱后端。请安装 bubblewrap（Linux / WSL2）", "error");
-        return;
+      if (requiresSandbox(value)) {
+        // 实时重探（不信任启动时的一次缓存）：bwrap 可用性随机器状态变化，切换即复查
+        const backend = cap.sandbox?.selectBackend();
+        const available = backend ? backend.probe() : false;
+        store.runtime.sandbox = backend
+          ? { kind: backend.info.kind, available, shellTool: backend.info.shellTool }
+          : { ...store.runtime.sandbox, available: false };
+        store.runtime.sandboxError = available
+          ? undefined
+          : backend
+            ? "沙箱后端探测失败（bwrap --version 未通过；请确认 bubblewrap 已安装且在 PATH）"
+            : cap.errors.sandbox ?? "沙箱能力未加载（plan-capabilities 未启用或加载失败）";
+        if (!available) {
+          ctx.ui.notify(`无法切换到该档位：${store.runtime.sandboxError}`, "error");
+          return;
+        }
       }
       store.setSafety(value);
       ctx.ui.notify(`安全档位已设置为: ${store.state.safetyMode}`, "info");
@@ -134,9 +147,13 @@ export function registerCommands(
       const loaded = (["sandbox", "preview", "question"] as CapabilityId[])
         .filter((id) => cap[id])
         .join(", ");
+      const failed = (Object.entries(cap.errors) as Array<[CapabilityId, string]>)
+        .map(([id, reason]) => `${id}: ${reason}`)
+        .join("\n");
       ctx.ui.notify(
         `已启用能力：${[...enabled].join(", ") || "（无）"}\n` +
-          `已加载：${loaded || "（无）"}\n` +
+          `已加载：${loaded || "（无）"}` +
+          `${failed ? `\n加载失败：\n${failed}` : ""}\n` +
           `用法：启动时 /plan-capabilities（或 --plan-capabilities）= all | none | sandbox,preview,...` +
           `；替换实现用 --plan-capabilities-<id>=包名。改后 /reload 生效`,
         "info",

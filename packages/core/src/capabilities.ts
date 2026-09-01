@@ -71,14 +71,20 @@ function resolveModule(id: CapabilityId, flags: Record<string, unknown>): string
 }
 
 /**
- * 惰性加载能力：按启用门控 + resolver 包名动态 import。失败 → 该能力缺省（降级），不影响其它。
- * 返回 registry（各能力模块的 `undefined` = 未启用/不可用）。
+ * 惰性加载能力：按启用门控 + resolver 包名动态 import。失败 → 该能力缺省（降级），不影响其它；
+ * 降级原因记入 `errors`（`/plan-capabilities` 诊断可见化，不再静默）。
  */
+/** 能力注册结果（loadCapabilities 返回：registry + 降级原因）。 */
+export type LoadedCapabilities = CapabilityRegistry & {
+  errors: Partial<Record<CapabilityId, string>>;
+};
+
 export async function loadCapabilities(
   flags: Record<string, unknown>,
-): Promise<CapabilityRegistry> {
+): Promise<LoadedCapabilities> {
   const enabled = parseEnabled(flags["plan-capabilities"]);
   const reg: CapabilityRegistry = {};
+  const errors: Partial<Record<CapabilityId, string>> = {};
   const ids: CapabilityId[] = ["sandbox", "preview", "question"];
   for (const id of ids) {
     if (!enabled.has(id)) continue; // 按需启用：被关掉则不加载
@@ -95,8 +101,10 @@ export async function loadCapabilities(
         reg.question = { registerQuestionTool: mod.registerQuestionTool as QuestionApi["registerQuestionTool"] };
       }
     } catch (error) {
-      console.warn(`[pi-plan-mode] 能力 ${id} 不可用，降级：${(error as Error)?.message ?? error}`);
+      const message = `能力 ${id} 不可用，降级：${(error as Error)?.message ?? error}`;
+      errors[id] = (error as Error)?.message ?? String(error);
+      console.warn(`[pi-plan-mode] ${message}`);
     }
   }
-  return reg;
+  return { ...reg, errors };
 }

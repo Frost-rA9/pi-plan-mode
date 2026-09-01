@@ -13,20 +13,26 @@ export function registerSandbox(
   pi: ExtensionAPI,
   store: { state: PbState; runtime: PbRuntime },
   sandboxApi?: SandboxApi,
+  loadError?: string,
 ): void {
   if (!sandboxApi) {
-    // 无 OS 沙箱能力 → 不覆盖 shell 工具（pi 内置 bash 保留），档位 available=false → gate 降级 supervised
+    // 无 OS 沙箱能力（未启用/加载失败）→ 不覆盖 shell 工具（pi 内置 bash 保留），档位 available=false → gate 降级 supervised
     store.runtime.sandbox = { kind: "bwrap", available: false, shellTool: "bash" };
+    store.runtime.sandboxError =
+      loadError ?? "未启用（plan-capabilities 未包含 sandbox，需 /reload）";
     return;
   }
 
   const backend = sandboxApi.selectBackend();
-  backend.probe();
+  const available = backend.probe();
   store.runtime.sandbox = {
     kind: backend.info.kind,
-    available: backend.info.available,
+    available,
     shellTool: backend.info.shellTool,
   };
+  store.runtime.sandboxError = available
+    ? undefined
+    : "沙箱后端探测失败（bwrap --version 未通过；请确认 bubblewrap 已安装且在 PATH）";
 
   const workspaceRoot = process.cwd();
   // 覆盖 bash 须透传 settings.json 的 shellPath；winacl 用 pwsh，无 shellPath。

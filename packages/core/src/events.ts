@@ -73,6 +73,8 @@ export function emptyState(): PbState {
 /** 运行时字段（不持久化）：沙箱后端探测缓存、plan 前工具集快照、confirm 频率计数、notice 防抖 */
 export interface PbRuntime {
   sandbox: SandboxBackendInfo;
+  /** 最近一次沙箱能力加载/探测失败的原因（诊断可见化；不持久化） */
+  sandboxError?: string;
   toolsBeforePlanMode: string[] | undefined;
   confirmCount: number;
   notifiedMode: Mode | undefined;
