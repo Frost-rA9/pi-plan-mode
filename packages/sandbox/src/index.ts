@@ -47,3 +47,13 @@ export {
 } from "./config.ts";
 
 export const NAME = "pi-plan-sandbox";
+
+// 契约自检（编译期）：本包入口满足 pi-plan-bridge 的 SandboxApi 契约——
+// 替换实现须同构；若接口漂移，此处报错而非运行时暴露。
+import type { SandboxApi } from "pi-plan-bridge";
+import { selectBackend as _selectBackend } from "./backend.ts";
+import { detectShellPath as _detectShellPath } from "./bwrap.ts";
+export const __sandboxApiContract: SandboxApi = {
+  selectBackend: _selectBackend,
+  detectShellPath: _detectShellPath,
+};

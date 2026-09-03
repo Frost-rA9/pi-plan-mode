@@ -1,7 +1,7 @@
 /**
  * pi-plan-preview · 计划预览库（启发式摘要，无 LLM、无 ctx、无 UI 渲染）。
  *
- * 实现 pi-plan-bridge 的 PlanPreviewRenderer：把计划文本生成简短摘要。
+ * 实现 pi-plan-bridge 的 PreviewApi 契约（summarize）：把计划文本生成简短摘要。
  * 作为**库**被 pi-plan-mode import（route A：单一宿主 + 能力库），无需事件总线 RPC。
  */
 import type { PlanSummary } from "pi-plan-bridge";
@@ -48,3 +48,7 @@ export function summarize(plan: string, maxBullets = 5): PlanSummary {
     lines: lines.length,
   };
 }
+
+// 契约自检（编译期）：本包入口满足 pi-plan-bridge 的 PreviewApi 契约。
+import type { PreviewApi } from "pi-plan-bridge";
+export const __previewApiContract: PreviewApi = { summarize };

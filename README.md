@@ -68,5 +68,5 @@ npm test                 # 跑全部 workspace 测试（各包 test/*.spec.ts）
 
 - **插拔方式一致**：所有能力 = 库，mode 经统一 loader（`loadCapabilities`）按需加载/替换，契约在 bridge。
 - **关键约束**：`BashSpawnHook` 是同步的 → sandbox 不能做成扩展，只能作为被 mode import 的库（mode 注入 `readState`）；故不采用多扩展 + 事件总线 RPC（`rpcRequest/rpcServe` 已弃）。
-- 单源：类型/纯函数/`classifyPodmanWrite`/安全清单（`SENSITIVE_HOME_*`）/挂载路径判定在 bridge；sandbox 私有策略（`HOME_ALLOW_REMOUNTS`/`WORKSPACE_RO_SUBPATHS`）在 sandbox；交互层配置在 mode。
+- 单源：类型/能力契约（`SandboxApi`/`PreviewApi`/`QuestionApi`/`CapabilityRegistry`）/纯函数/`classifyPodmanWrite`/安全清单（`SENSITIVE_HOME_*`）/挂载路径判定在 bridge；sandbox 私有策略（`HOME_ALLOW_REMOUNTS`/`WORKSPACE_RO_SUBPATHS`）在 sandbox；交互层配置在 mode。
 - 不变量：真实 OS 隔离靠 OS/虚拟化边界；fail-closed；模型不能自切模式；dismissed ≠ rejected；计划文件真源；最小暴露面。

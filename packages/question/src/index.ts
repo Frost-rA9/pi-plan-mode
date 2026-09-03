@@ -5,7 +5,7 @@
  */
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { QuestionAsker, QuestionAnswer, QuestionSpec } from "pi-plan-bridge";
+import type { QuestionAnswer, QuestionSpec } from "pi-plan-bridge";
 
 const OTHERS = "其他（自行输入）";
 const RECOMMENDED_SUFFIX = "（推荐）";
@@ -103,4 +103,6 @@ export function registerQuestionTool(pi: ExtensionAPI): void {
   });
 }
 
-export type { QuestionAsker };
+// 契约自检（编译期）：本包入口满足 pi-plan-bridge 的 QuestionApi 契约。
+import type { QuestionApi } from "pi-plan-bridge";
+export const __questionApiContract: QuestionApi = { registerQuestionTool };

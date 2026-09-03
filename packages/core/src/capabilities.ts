@@ -7,14 +7,12 @@
  * - 替换：能力 id → 实现包名可由 `plan-capabilities-<id>` flag 覆盖（resolver），
  *   换一个实现同一契约的库包即可，无需改宿主逻辑。
  */
-import type { ExtensionAPI, BashToolOptions } from "@earendil-works/pi-coding-agent";
 import type {
   CapabilityId,
-  Mode,
-  PlanSummary,
-  SafetyMode,
-  SandboxBackendInfo,
-  SandboxConfig,
+  CapabilityRegistry,
+  PreviewApi,
+  QuestionApi,
+  SandboxApi,
 } from "pi-plan-bridge";
 
 /** 交换点：能力 id → 默认实现包名。替换 = 改此处，或经 `plan-capabilities-<id>` flag 覆盖。 */
@@ -24,32 +22,9 @@ export const DEFAULT_CAPABILITY_MODULES: Record<CapabilityId, string> = {
   question: "pi-plan-question",
 };
 
-/** mode 实际使用的 sandbox 后端最小契约（与 pi-plan-sandbox 的 `SandboxBackend` 结构兼容）。 */
-export interface SandboxBackendLike {
-  info: SandboxBackendInfo;
-  probe(): boolean;
-  createToolOptions(ctx: {
-    cwd: string;
-    shellPath?: string;
-    readState: () => { mode: Mode; safetyMode: SafetyMode; sandbox: SandboxConfig };
-  }): BashToolOptions;
-}
-export interface SandboxApi {
-  selectBackend(platform?: string): SandboxBackendLike;
-  detectShellPath(cwd: string): string | undefined;
-}
-export interface PreviewApi {
-  summarize(plan: string, max?: number): PlanSummary;
-}
-export interface QuestionApi {
-  registerQuestionTool(pi: ExtensionAPI): void;
-}
-export interface CapabilityRegistry {
-  sandbox?: SandboxApi;
-  preview?: PreviewApi;
-  question?: QuestionApi;
-}
-
+// 能力接口（SandboxApi/PreviewApi/QuestionApi/CapabilityRegistry）已上移 pi-plan-bridge 单源；
+// 能力包实现同一契约，宿主经 loadCapabilities 消费，替换实现有编译期保证。
+export type { SandboxBackendLike, SandboxApi, PreviewApi, QuestionApi, CapabilityRegistry } from "pi-plan-bridge";
 /** 解析 plan-capabilities 值（默认全开；"none" 全关；逗号列表选择）。 */
 export function parseEnabled(raw: unknown): Set<CapabilityId> {
   if (typeof raw !== "string") return new Set<CapabilityId>(["sandbox", "preview", "question"]);

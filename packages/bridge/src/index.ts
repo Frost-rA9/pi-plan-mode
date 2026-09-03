@@ -15,7 +15,7 @@
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, normalize, relative, resolve } from "node:path";
-import type { BashToolOptions, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { BashToolOptions, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /* ------------------------------ 能力注册（按需启用 + 可替换） ------------------------------ */
 
@@ -88,27 +88,7 @@ export function formatPlanSummary(s: PlanSummary): string {
   return parts.filter(Boolean).join("\n");
 }
 
-/* ------------------------------ 能力接口（依赖倒置；库实现，mode 经它调用） ------------------------------ */
-
-/** mode 传给 sandbox 的上下文（sandbox 无状态、无 ctx；只需这些参数产 executor） */
-export interface SafetyContext {
-  cwd: string;
-  profile: SandboxProfile;
-  sandbox: SandboxConfig;
-}
-
-/** OS 沙箱能力（pi-plan-sandbox 实现；由 mode import，注入 readState 后 buildToolOptions） */
-export interface SafetyProvider {
-  probe(): Promise<SandboxBackendInfo>;
-  shellTool(): SandboxShellTool;
-  buildToolOptions(ctx: SafetyContext): Promise<BashToolOptions>;
-  dispose?(): Promise<void>;
-}
-
-/** 计划摘要能力（pi-plan-preview 实现；启发式，无 ctx、无 UI） */
-export interface PlanPreviewRenderer {
-  summarize(plan: string): Promise<PlanSummary> | PlanSummary;
-}
+/* ------------------------------ 能力契约（依赖倒置；库实现，宿主经 loadCapabilities 消费） ------------------------------ */
 
 /** 一个结构化澄清问题（schema 形状） */
 export interface QuestionSpec {
@@ -121,11 +101,6 @@ export interface QuestionSpec {
 export interface QuestionAnswer {
   kind: "choice" | "custom" | "cancel";
   value: string;
-}
-
-/** 结构化澄清能力（pi-plan-question 实现；由 mode 注册 ask_user_question 工具） */
-export interface QuestionAsker {
-  ask(ctx: ExtensionContext, questions: QuestionSpec[]): Promise<QuestionAnswer[]>;
 }
 
 /* ------------------------------ podman 控制面（sandbox 与 mode 共用；纯函数/常量） ------------------------------ */
@@ -180,6 +155,42 @@ export function classifyPodmanWrite(command: string): boolean {
   }
   if (PODMAN_READONLY_SUBCOMMANDS.has(top)) return false;
   return true;
+}
+
+/* ------------------------------ 能力契约（可替换实现；bridge 单源，宿主与库共用） ------------------------------ */
+
+/** mode 实际使用的 sandbox 后端最小契约（与 pi-plan-sandbox 的 `SandboxBackend` 结构兼容）。 */
+export interface SandboxBackendLike {
+  info: SandboxBackendInfo;
+  probe(): boolean;
+  createToolOptions(ctx: {
+    cwd: string;
+    shellPath?: string;
+    readState: () => { mode: Mode; safetyMode: SafetyMode; sandbox: SandboxConfig };
+  }): BashToolOptions;
+}
+
+/** OS 沙箱能力（pi-plan-sandbox 实现；由 mode import，注入 readState 后 buildToolOptions） */
+export interface SandboxApi {
+  selectBackend(platform?: string): SandboxBackendLike;
+  detectShellPath(cwd: string): string | undefined;
+}
+
+/** 计划摘要能力（pi-plan-preview 实现；启发式，无 ctx、无 UI） */
+export interface PreviewApi {
+  summarize(plan: string, maxBullets?: number): PlanSummary;
+}
+
+/** 结构化澄清能力（pi-plan-question 实现；由 mode 注册 ask_user_question 工具） */
+export interface QuestionApi {
+  registerQuestionTool(pi: ExtensionAPI): void;
+}
+
+/** 能力注册表（loadCapabilities 的产出；三个能力均可选——缺席即降级，绝不影响其它） */
+export interface CapabilityRegistry {
+  sandbox?: SandboxApi;
+  preview?: PreviewApi;
+  question?: QuestionApi;
 }
 
 /* ------------------------------ home 敏感清单 + 挂载路径判定（沙箱与应用层共用） ------------------------------ */
