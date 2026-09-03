@@ -9,6 +9,9 @@ import {
   isSafetyMode,
   isSandboxedProfile,
   formatPlanSummary,
+  SAFETY_MODE_CATALOG,
+  safetyModeInfo,
+  safetyModeAvailability,
 } from "../src/index.ts";
 
 assert.equal(requiresSandbox("readonly"), true);
@@ -39,4 +42,29 @@ assert.ok(fmt.includes("## 目标：计划"));
 assert.ok(fmt.includes("- a"));
 assert.ok(fmt.includes("2 步 / 4 行"));
 
-console.log("✅ bridge: classifyPodmanWrite / safety / formatPlanSummary");
+/* -------------------- 档位目录（SAFETY_MODE_CATALOG / safetyModeAvailability） -------------------- */
+
+// 目录：四档固定序，requiresSandbox 与 requiresSandbox() 一致。
+assert.equal(SAFETY_MODE_CATALOG.length, 4);
+assert.equal(SAFETY_MODE_CATALOG[0].mode, "readonly");
+assert.equal(SAFETY_MODE_CATALOG[1].mode, "verify");
+assert.equal(SAFETY_MODE_CATALOG[2].mode, "supervised");
+assert.equal(SAFETY_MODE_CATALOG[3].mode, "strict");
+for (const entry of SAFETY_MODE_CATALOG) {
+  assert.equal(entry.requiresSandbox, requiresSandbox(entry.mode)); // 目录与判定函数一致
+}
+
+// safetyModeInfo：按 id 查条目。
+assert.equal(safetyModeInfo("readonly")?.description, "OS 只读沙箱 + 零确认（bwrap / winacl+pwsh）");
+assert.equal(safetyModeInfo("bogus" as any), undefined);
+
+// safetyModeAvailability：沙箱档跟随后端可用性；交互层档恒可用。
+assert.deepEqual(safetyModeAvailability("readonly", true), { allowed: true });
+assert.deepEqual(safetyModeAvailability("verify", true), { allowed: true });
+assert.equal(safetyModeAvailability("readonly", false).allowed, false);
+assert.ok(safetyModeAvailability("readonly", false).reason); // 有原因文案
+assert.equal(safetyModeAvailability("readonly", false, "bwrap 缺失").reason, "bwrap 缺失");
+assert.equal(safetyModeAvailability("supervised", false).allowed, true); // 无沙箱档不依赖后端
+assert.equal(safetyModeAvailability("strict", false).allowed, true);
+
+console.log("✅ bridge: classifyPodmanWrite / safety / formatPlanSummary / safetyCatalog");

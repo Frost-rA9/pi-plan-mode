@@ -49,6 +49,67 @@ export function isSafetyMode(v: unknown): v is SafetyMode {
   return v === "readonly" || v === "verify" || v === "supervised" || v === "strict";
 }
 
+/* ------------------------------ 档位目录（permission profile catalog 语义；单源描述 + 可用性判定输入） ------------------------------ */
+
+/** 档位目录条目：id + 描述（单源）+ 是否需要 OS 沙箱后端。 */
+export interface SafetyModeInfo {
+  mode: SafetyMode;
+  /** 该档位的用户可读描述（/plan-safety 目录展示与帮助共用一个来源）。 */
+  description: string;
+  /** 是否需要 OS 沙箱后端（false = 纯交互层档位，如 supervised/strict）。 */
+  requiresSandbox: boolean;
+}
+
+/** 档位目录（固定四档，序即展示序：沙箱档优先，降级档在后）。 */
+export const SAFETY_MODE_CATALOG: readonly SafetyModeInfo[] = [
+  {
+    mode: "readonly",
+    description: "OS 只读沙箱 + 零确认（bwrap / winacl+pwsh）",
+    requiresSandbox: true,
+  },
+  {
+    mode: "verify",
+    description: "工作区可写沙箱（.git/.pi 只读子路径）+ 零确认——验证式规划",
+    requiresSandbox: true,
+  },
+  {
+    mode: "supervised",
+    description: "无沙箱 + 只读集合放行 + 未知 confirm",
+    requiresSandbox: false,
+  },
+  {
+    mode: "strict",
+    description: "无沙箱 + 只读集合放行 + 未知拒绝",
+    requiresSandbox: false,
+  },
+] as const;
+
+/** 按 id 查档位目录条目（不存在返回 undefined；供 UI/通知层复用描述）。 */
+export function safetyModeInfo(mode: SafetyMode): SafetyModeInfo | undefined {
+  return SAFETY_MODE_CATALOG.find((entry) => entry.mode === mode);
+}
+
+/**
+ * 判定某档位当前是否可用并给出不可用原因（fail-closed 决策的单一入口）。
+ * - requiresSandbox 档位：需要 OS 沙箱后端可用；不可用 → { allowed: false, reason }。
+ * - 纯交互层档位（supervised/strict）：始终允许。
+ * @param backendAvailable 当前 OS 沙箱后端可用性（readonly/verify 档位判定输入）
+ * @param backendReason 后端不可用原因（backendAvailable=false 时展示）
+ */
+export function safetyModeAvailability(
+  mode: SafetyMode,
+  backendAvailable: boolean,
+  backendReason?: string,
+): { allowed: boolean; reason?: string } {
+  const info = safetyModeInfo(mode);
+  if (!info || !info.requiresSandbox) return { allowed: true };
+  if (backendAvailable) return { allowed: true };
+  return {
+    allowed: false,
+    reason: backendReason ?? "OS 沙箱后端不可用（bwrap / winacl 探测失败）",
+  };
+}
+
 export type SandboxBackendKind = "bwrap" | "winacl";
 export type SandboxShellTool = "bash" | "powershell";
 

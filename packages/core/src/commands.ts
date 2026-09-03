@@ -4,18 +4,19 @@
  * podman 控制面 fail-closed 保留。
  */
 import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { isSafetyMode, requiresSandbox, type SafetyMode, type CapabilityId } from "pi-plan-bridge";
+import {
+  isSafetyMode,
+  requiresSandbox,
+  safetyModeAvailability,
+  SAFETY_MODE_CATALOG,
+  safetyModeInfo,
+  type SafetyMode,
+  type CapabilityId,
+} from "pi-plan-bridge";
 import type { PlanbuildStore } from "./state.ts";
 import type { ModeActions } from "./modes.ts";
 import { parseEnabled, type LoadedCapabilities } from "./capabilities.ts";
 import { isSafeExtraMount, normalizeMountPath } from "pi-plan-bridge";
-
-const SAFETY_HELP =
-  "档位含义：\n" +
-  "  readonly    OS 只读沙箱 + 零确认（bwrap / winacl+pwsh）\n" +
-  "  verify      工作区可写沙箱（.git/.pi 只读子路径）+ 零确认——验证式规划\n" +
-  "  supervised  无沙箱 + 只读集合放行 + 未知 confirm\n" +
-  "  strict      无沙箱 + 只读集合放行 + 未知拒绝";
 
 export function registerCommands(
   pi: ExtensionAPI,
@@ -71,38 +72,53 @@ export function registerCommands(
   pi.registerCommand("plan-safety", {
     description: "显示/设置安全档位（readonly / verify / supervised / strict）",
     handler: async (args, ctx) => {
+      // 实时重探（不信任启动时的一次缓存）：bwrap 可用性随机器状态变化，切换即复查。
+      const probeBackend = (): { available: boolean; reason?: string } => {
+        const backend = cap.sandbox?.selectBackend();
+        if (!backend) {
+          const reason = cap.errors.sandbox ?? "沙箱能力未加载（plan-capabilities 未启用或加载失败）";
+          store.runtime.sandbox = { ...store.runtime.sandbox, available: false };
+          store.runtime.sandboxError = reason;
+          return { available: false, reason };
+        }
+        const available = backend.probe();
+        store.runtime.sandbox = { kind: backend.info.kind, available, shellTool: backend.info.shellTool };
+        store.runtime.sandboxError = available
+          ? undefined
+          : "沙箱后端探测失败（bwrap --version 未通过；请确认 bubblewrap 已安装且在 PATH）";
+        return { available, reason: store.runtime.sandboxError };
+      };
+
       if (!args?.trim()) {
+        // 档位目录展示：四档 + 各自可用性（借鉴 codex permission profile catalog 语义）。
+        const { available, reason: backendReason } = probeBackend();
+        const lines: string[] = [];
+        for (const entry of SAFETY_MODE_CATALOG) {
+          const av = safetyModeAvailability(entry.mode, available, backendReason);
+          const marker = entry.mode === store.state.safetyMode ? "▶ " : "  ";
+          const state = av.allowed ? "可用" : `不可用（${av.reason}）`;
+          lines.push(`${marker}${entry.mode.padEnd(10)} ${state} — ${entry.description}`);
+        }
         ctx.ui.notify(
-          `当前安全档位: ${store.state.safetyMode}（OS 沙箱可用: ${store.runtime.sandbox.available ? "是" : "否"}）` +
-            `${store.runtime.sandboxError ? `\n沙箱原因: ${store.runtime.sandboxError}` : ""}\n${SAFETY_HELP}`,
+          `当前安全档位: ${store.state.safetyMode}\n${lines.join("\n")}\n用法: /plan-safety <档位>`,
           "info",
         );
         return;
       }
       const value = args.trim() as SafetyMode;
       if (!isSafetyMode(value)) {
-        ctx.ui.notify(`无效值: ${args.trim()}。可选值: readonly / verify / supervised / strict`, "error");
+        ctx.ui.notify(`无效值: ${args.trim()}。可选值: ${SAFETY_MODE_CATALOG.map((e) => e.mode).join(" / ")}`, "error");
         return;
       }
-      if (requiresSandbox(value)) {
-        // 实时重探（不信任启动时的一次缓存）：bwrap 可用性随机器状态变化，切换即复查
-        const backend = cap.sandbox?.selectBackend();
-        const available = backend ? backend.probe() : false;
-        store.runtime.sandbox = backend
-          ? { kind: backend.info.kind, available, shellTool: backend.info.shellTool }
-          : { ...store.runtime.sandbox, available: false };
-        store.runtime.sandboxError = available
-          ? undefined
-          : backend
-            ? "沙箱后端探测失败（bwrap --version 未通过；请确认 bubblewrap 已安装且在 PATH）"
-            : cap.errors.sandbox ?? "沙箱能力未加载（plan-capabilities 未启用或加载失败）";
-        if (!available) {
-          ctx.ui.notify(`无法切换到该档位：${store.runtime.sandboxError}`, "error");
-          return;
-        }
+      const backendState = probeBackend();
+      const av = safetyModeAvailability(value, backendState.available, backendState.reason);
+      if (!av.allowed) {
+        ctx.ui.notify(`无法切换到 ${value}: ${av.reason}`, "error");
+        return;
       }
       store.setSafety(value);
-      ctx.ui.notify(`安全档位已设置为: ${store.state.safetyMode}`, "info");
+      const info = safetyModeInfo(value);
+      ctx.ui.notify(`安全档位已设置为: ${store.state.safetyMode}${info ? `（${info.description}）` : ""}`, "info");
     },
   });
 
