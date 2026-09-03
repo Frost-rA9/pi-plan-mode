@@ -8,16 +8,19 @@
  */
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import type { Mode, SafetyMode, SandboxConfig } from "pi-plan-bridge";
-import { classifyPodmanWrite } from "pi-plan-bridge";
 import {
-  HOME_ALLOW_REMOUNTS,
+  classifyPodmanWrite,
   SENSITIVE_HOME_DIRS,
   SENSITIVE_HOME_FILES,
-  WORKSPACE_RO_SUBPATHS,
-} from "./config.ts";
+  expandHomePath,
+  filterSafeExtraMounts,
+  isPathWithin,
+  normalizeMountPath,
+} from "pi-plan-bridge";
+import { HOME_ALLOW_REMOUNTS, WORKSPACE_RO_SUBPATHS } from "./config.ts";
 
 /** 检测 bwrap 是否可用（本机；WSL2 userns 实测正常） */
 export function detectBwrap(): boolean {
@@ -55,61 +58,6 @@ export interface BwrapOptions {
   allowRemounts?: string[];
   /** 测试/多 home 场景覆盖宿主 home；生产默认 homedir()。 */
   home?: string;
-}
-
-/** 展开 `~`/`~/` 前缀（其余原样返回）。 */
-export function expandHomePath(p: string, home = homedir()): string {
-  if (p === "~") return home;
-  if (p.startsWith("~/")) return join(home, p.slice(2));
-  return p;
-}
-
-/** 规范化挂载路径，并解析已有路径的符号链接别名。 */
-export function normalizeMountPath(input: string, home = homedir()): string {
-  const expanded = expandHomePath(input.trim(), home);
-  const absolute = isAbsolute(expanded) ? normalize(expanded) : resolve(expanded);
-  try {
-    return realpathSync(absolute);
-  } catch {
-    return absolute;
-  }
-}
-
-function isPathWithin(parent: string, candidate: string): boolean {
-  const rel = relative(normalize(parent), normalize(candidate));
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-}
-
-/**
- * 通用 extras 是否安全：不能覆盖敏感目录/文件，也不能挂载其祖先目录绕过 mask。
- * `.pi/agent/skills` 等内置 allowlist 不经过此入口恢复。
- */
-export function isSafeExtraMount(input: string, home = homedir()): boolean {
-  if (!input.trim()) return false;
-  const candidate = normalizeMountPath(input, home);
-  for (const dir of SENSITIVE_HOME_DIRS) {
-    const sensitive = join(home, dir);
-    if (isPathWithin(sensitive, candidate) || isPathWithin(candidate, sensitive)) return false;
-  }
-  for (const file of SENSITIVE_HOME_FILES) {
-    const sensitive = join(home, file);
-    if (isPathWithin(sensitive, candidate) || isPathWithin(candidate, sensitive)) return false;
-  }
-  return true;
-}
-
-/** 规范化并过滤通用 extras；最终组装层仍需再次调用，形成 fail-closed 防线。 */
-export function filterSafeExtraMounts(inputs: string[], home = homedir()): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const input of inputs) {
-    if (!isSafeExtraMount(input, home)) continue;
-    const normalized = normalizeMountPath(input, home);
-    if (seen.has(normalized)) continue;
-    seen.add(normalized);
-    result.push(normalized);
-  }
-  return result;
 }
 
 function isAllowedHomeRemount(input: string, home: string): boolean {

@@ -8,7 +8,7 @@ import { isSafetyMode, requiresSandbox, type SafetyMode, type CapabilityId } fro
 import type { PlanbuildStore } from "./state.ts";
 import type { ModeActions } from "./modes.ts";
 import { parseEnabled, type LoadedCapabilities } from "./capabilities.ts";
-import { isSafeExtraMount, normalizeMountPath } from "pi-plan-sandbox";
+import { isSafeExtraMount, normalizeMountPath } from "pi-plan-bridge";
 
 const SAFETY_HELP =
   "档位含义：\n" +

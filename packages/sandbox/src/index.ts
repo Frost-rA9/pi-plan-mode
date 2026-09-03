@@ -19,10 +19,6 @@ export {
   overrideBwrapDetect,
   probeBwrap,
   safeQuote,
-  expandHomePath,
-  normalizeMountPath,
-  isSafeExtraMount,
-  filterSafeExtraMounts,
   detectSettingsSkills,
   getMaskSource,
   buildHomeMounts,
@@ -42,10 +38,8 @@ export { winaclUsable, createWinaclBackend } from "./winacl.ts";
 // 任何平台经 sandbox 包入口加载 win32/ 都会执行 koffi.struct 注册，jiti 双重加载即抛
 // 「Duplicate type name」（PIB_STARTUPINFOW）→ import("pi-plan-sandbox") 失败 → 能力整体降级。
 
-// 安全清单（bwrap/winacl 内部的敏感路径定义；mode 不需 import）
+// 安全清单（bwrap/winacl 内部的敏感路径定义；mode 不需 import；清单本体已上移 pi-plan-bridge 单源）
 export {
-  SENSITIVE_HOME_DIRS,
-  SENSITIVE_HOME_FILES,
   HOME_ALLOW_REMOUNTS,
   WORKSPACE_RO_SUBPATHS,
   win32SensitivePaths,

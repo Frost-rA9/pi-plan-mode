@@ -12,6 +12,9 @@
  * 关键约束：BashSpawnHook 是同步的，沙箱 spawnHook 需同步读 mode 档位 → 沙箱不能做成扩展，
  * 只能作为被 mode import 的库（mode 注入 readState 闭包）。preview/question 同理作为库，统一插拔方式。
  */
+import { realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { isAbsolute, join, normalize, relative, resolve } from "node:path";
 import type { BashToolOptions, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 /* ------------------------------ 能力注册（按需启用 + 可替换） ------------------------------ */
@@ -177,4 +180,77 @@ export function classifyPodmanWrite(command: string): boolean {
   }
   if (PODMAN_READONLY_SUBCOMMANDS.has(top)) return false;
   return true;
+}
+
+/* ------------------------------ home 敏感清单 + 挂载路径判定（沙箱与应用层共用） ------------------------------ */
+
+/** home 内需隐藏的敏感目录（凭据/密钥；bwrap tmpfs 覆盖为空；winacl deny-read）。 */
+export const SENSITIVE_HOME_DIRS = [
+  ".ssh",
+  ".aws",
+  ".gnupg",
+  ".kube",
+  ".netrc",
+  ".config", // 含 pi-agent 配置（sudo 密码 env）、gh token 等
+  ".pi", // 含 auth.json 等凭据（skills/bin 由 HOME_ALLOW_REMOUNTS 恢复）
+  ".copilot",
+] as const;
+
+/** home 根级敏感文件（bwrap 空文件掩码 / winacl deny-read；宿主存在才生效） */
+export const SENSITIVE_HOME_FILES = [".gitconfig", ".bash_history", ".netrc", ".npmrc"] as const;
+
+/** 展开 `~`/`~/` 前缀（其余原样返回）。 */
+export function expandHomePath(p: string, home = homedir()): string {
+  if (p === "~") return home;
+  if (p.startsWith("~/")) return join(home, p.slice(2));
+  return p;
+}
+
+/** 规范化挂载路径，并解析已有路径的符号链接别名。 */
+export function normalizeMountPath(input: string, home = homedir()): string {
+  const expanded = expandHomePath(input.trim(), home);
+  const absolute = isAbsolute(expanded) ? normalize(expanded) : resolve(expanded);
+  try {
+    return realpathSync(absolute);
+  } catch {
+    return absolute;
+  }
+}
+
+/** 路径关系判定：candidate 是否位于 parent 内（含自身；符号链接已解。sandbox 的 allowlist 复用）。 */
+export function isPathWithin(parent: string, candidate: string): boolean {
+  const rel = relative(normalize(parent), normalize(candidate));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/**
+ * 通用 extras 是否安全：不能覆盖敏感目录/文件，也不能挂载其祖先目录绕过 mask。
+ * `.pi/agent/skills` 等内置 allowlist 不经过此入口恢复。
+ */
+export function isSafeExtraMount(input: string, home = homedir()): boolean {
+  if (!input.trim()) return false;
+  const candidate = normalizeMountPath(input, home);
+  for (const dir of SENSITIVE_HOME_DIRS) {
+    const sensitive = join(home, dir);
+    if (isPathWithin(sensitive, candidate) || isPathWithin(candidate, sensitive)) return false;
+  }
+  for (const file of SENSITIVE_HOME_FILES) {
+    const sensitive = join(home, file);
+    if (isPathWithin(sensitive, candidate) || isPathWithin(candidate, sensitive)) return false;
+  }
+  return true;
+}
+
+/** 规范化并过滤通用 extras；最终组装层仍需再次调用，形成 fail-closed 防线。 */
+export function filterSafeExtraMounts(inputs: string[], home = homedir()): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const input of inputs) {
+    if (!isSafeExtraMount(input, home)) continue;
+    const normalized = normalizeMountPath(input, home);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
 }

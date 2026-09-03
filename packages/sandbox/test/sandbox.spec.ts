@@ -16,9 +16,9 @@ import {
   detectPodmanSocket,
   normalizeShellPath,
   sandboxDecision,
-  isSafeExtraMount,
   type SandboxDecisionState,
 } from "../src/index.ts";
+import { isSafeExtraMount } from "pi-plan-bridge";
 
 // v4 路线 X：win32→powershell，linux→bash
 assert.equal(selectBackend("win32").shellTool, "powershell");

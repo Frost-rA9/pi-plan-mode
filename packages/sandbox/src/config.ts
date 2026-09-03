@@ -1,24 +1,10 @@
 /**
- * pi-plan-sandbox · 安全配置：凭据/敏感路径清单 + win32 映射。
+ * pi-plan-sandbox · 安全配置：home 允许清单 + win32 映射（敏感清单/路径判定已上移 pi-plan-bridge 单源）。
  *
- * 从原 `src/config.ts` 的「沙箱（层 1）配置」+「win32 映射」抽出下沉本包。
- * gate 侧（只读集合/写模式）留 mode 包，不在此。
+ * 仅保留 sandbox 私有的策略：allowlist（remounts / workspace 只读子路径）+ win32 映射。
  */
 
-/** home 内需隐藏的敏感目录（凭据/密钥；bwrap tmpfs 覆盖为空；winacl deny-read）。 */
-export const SENSITIVE_HOME_DIRS = [
-  ".ssh",
-  ".aws",
-  ".gnupg",
-  ".kube",
-  ".netrc",
-  ".config", // 含 pi-agent 配置（sudo 密码 env）、gh token 等
-  ".pi", // 含 auth.json 等凭据（skills/bin 由 HOME_ALLOW_REMOUNTS 恢复）
-  ".copilot",
-] as const;
-
-/** home 根级敏感文件（bwrap 空文件掩码 / winacl deny-read；宿主存在才生效） */
-export const SENSITIVE_HOME_FILES = [".gitconfig", ".bash_history", ".netrc", ".npmrc"] as const;
+import { SENSITIVE_HOME_DIRS, SENSITIVE_HOME_FILES } from "pi-plan-bridge";
 
 /** 敏感目录覆盖后仍需可见的子路径（bwrap 后挂载恢复；winacl 细粒度 deny） */
 export const HOME_ALLOW_REMOUNTS = [".pi/agent/skills", ".pi/agent/bin", ".config/gh"] as const;
