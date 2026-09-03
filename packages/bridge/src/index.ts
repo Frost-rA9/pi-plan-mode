@@ -60,6 +60,8 @@ export interface SandboxConfig {
   mountHome: boolean;
   dockerSocket: boolean;
   extras: string[];
+  /** 显式允许 Plan shell 只读看到 ModLens/Pi 复用所需的 auth/model 文件。 */
+  piReuse: boolean;
 }
 
 /** plan_mode_complete 三分支结果：approve=批准并执行 / continue=继续规划 / undefined=dismissed */

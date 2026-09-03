@@ -46,7 +46,7 @@ pi --plan-capabilities-question=my-ask  # 替换 question 实现
 - **计划文件即真源**：规划产物入 `.pi/plans/PLAN.md`，无内存镜像。
 - **批准三分支**：批准并执行（写计划文件 + 切 build）/ 继续规划 / `dismissed`（ESC = 留 plan 等指示）。
 - **安全档位**（`/plan-safety`）：`readonly`（默认，OS 只读沙箱）/ `verify`（工作区可写）/ `supervised`（无沙箱+confirm）/ `strict`（无沙箱+拒绝）。沙箱不可用自动降级 `supervised`（fail-closed，决不无限制执行）。
-- **沙箱挂载**（`/plan-sandbox`）：查看/更新沙箱额外挂载与掩码。
+- **沙箱挂载**（`/plan-sandbox`）：查看/更新沙箱额外挂载与掩码；`/plan-sandbox pi-reuse on` 经确认后只读开放 Pi reuse 所需的 `auth.json`/`models-store.json`，不开放整个 `~/.pi`。
 
 ## 安装 / 本地调试
 

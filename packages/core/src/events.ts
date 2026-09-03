@@ -46,6 +46,7 @@ export type PbEvent =
       sandboxMountHome?: boolean;
       sandboxDockerSocket?: boolean;
       sandboxExtras?: string[];
+      sandboxPiReuse?: boolean;
     };
 
 /** 折叠结果（可持久化状态；confirmCount 等会话内存语义不在此列） */
@@ -64,8 +65,8 @@ export function emptyState(): PbState {
     mode: "build",
     safetyMode: DEFAULT_SAFETY_MODE,
     planFilePath: "",
-    // 默认：home 只读挂载开（敏感目录隐藏）、docker.sock 可见（gate 拦写面）
-    sandbox: { mountHome: true, dockerSocket: true, extras: [] },
+    // 默认：home 只读挂载开（敏感目录隐藏）、docker.sock 可见（gate 拦写面）、Pi reuse 关闭
+    sandbox: { mountHome: true, dockerSocket: true, extras: [], piReuse: false },
     approveMemory: new Map(),
   };
 }
@@ -102,7 +103,8 @@ export function applyEvent(state: PbState, event: PbEvent): void {
       state.planFilePath = event.value;
       break;
     case "sandbox":
-      state.sandbox = event.value;
+      // 兼容早于 piReuse 字段的已持久化 sandbox 事件。
+      state.sandbox = { ...state.sandbox, ...event.value, piReuse: event.value.piReuse ?? state.sandbox.piReuse };
       break;
     case "grant":
       state.approveMemory.set(event.command, true);
@@ -115,6 +117,7 @@ export function applyEvent(state: PbState, event: PbEvent): void {
         mountHome: event.sandboxMountHome ?? state.sandbox.mountHome,
         dockerSocket: event.sandboxDockerSocket ?? state.sandbox.dockerSocket,
         extras: event.sandboxExtras ?? state.sandbox.extras,
+        piReuse: event.sandboxPiReuse ?? state.sandbox.piReuse,
       };
       break;
   }
@@ -160,6 +163,7 @@ export function parsePbEvents(entries: SessionEntryLike[]): PbEvent[] {
         sandboxDockerSocket:
           typeof data.sandboxDockerSocket === "boolean" ? data.sandboxDockerSocket : undefined,
         sandboxExtras: Array.isArray(data.sandboxExtras) ? (data.sandboxExtras as string[]) : undefined,
+        sandboxPiReuse: typeof data.sandboxPiReuse === "boolean" ? data.sandboxPiReuse : undefined,
       });
     }
   }

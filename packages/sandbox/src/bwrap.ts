@@ -8,11 +8,17 @@
  */
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
+import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import type { Mode, SafetyMode, SandboxConfig } from "pi-plan-bridge";
 import { classifyDockerWrite } from "pi-plan-bridge";
-import { HOME_ALLOW_REMOUNTS, SENSITIVE_HOME_DIRS, SENSITIVE_HOME_FILES, WORKSPACE_RO_SUBPATHS } from "./config.ts";
+import {
+  HOME_ALLOW_REMOUNTS,
+  PI_REUSE_FILES,
+  SENSITIVE_HOME_DIRS,
+  SENSITIVE_HOME_FILES,
+  WORKSPACE_RO_SUBPATHS,
+} from "./config.ts";
 
 /** 检测 bwrap 是否可用（本机；WSL2 userns 实测正常） */
 export function detectBwrap(): boolean {
@@ -45,16 +51,85 @@ export interface BwrapOptions {
   chdir?: string;
   profile: "readonly" | "verify";
   mountHome?: boolean;
+  /** 显式允许挂载 Pi reuse 所需的两个只读元数据文件。 */
+  piReuse?: boolean;
   extras?: string[];
   maskSocketPath?: string;
   allowRemounts?: string[];
+  /** 测试/多 home 场景覆盖宿主 home；生产默认 homedir()。 */
+  home?: string;
 }
 
-/** 展开 `~`/`~/` 前缀（其余原样返回） */
-export function expandHomePath(p: string): string {
-  if (p === "~") return homedir();
-  if (p.startsWith("~/")) return join(homedir(), p.slice(2));
+/** 展开 `~`/`~/` 前缀（其余原样返回）。 */
+export function expandHomePath(p: string, home = homedir()): string {
+  if (p === "~") return home;
+  if (p.startsWith("~/")) return join(home, p.slice(2));
   return p;
+}
+
+/** 规范化挂载路径，并解析已有路径的符号链接别名。 */
+export function normalizeMountPath(input: string, home = homedir()): string {
+  const expanded = expandHomePath(input.trim(), home);
+  const absolute = isAbsolute(expanded) ? normalize(expanded) : resolve(expanded);
+  try {
+    return realpathSync(absolute);
+  } catch {
+    return absolute;
+  }
+}
+
+function isPathWithin(parent: string, candidate: string): boolean {
+  const rel = relative(normalize(parent), normalize(candidate));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/**
+ * 通用 extras 是否安全：不能覆盖敏感目录/文件，也不能挂载其祖先目录绕过 mask。
+ * `.pi/agent/skills` 等内置 allowlist 不经过此入口恢复。
+ */
+export function isSafeExtraMount(input: string, home = homedir()): boolean {
+  if (!input.trim()) return false;
+  const candidate = normalizeMountPath(input, home);
+  for (const dir of SENSITIVE_HOME_DIRS) {
+    const sensitive = join(home, dir);
+    if (isPathWithin(sensitive, candidate) || isPathWithin(candidate, sensitive)) return false;
+  }
+  for (const file of SENSITIVE_HOME_FILES) {
+    const sensitive = join(home, file);
+    if (isPathWithin(sensitive, candidate) || isPathWithin(candidate, sensitive)) return false;
+  }
+  return true;
+}
+
+/** 规范化并过滤通用 extras；最终组装层仍需再次调用，形成 fail-closed 防线。 */
+export function filterSafeExtraMounts(inputs: string[], home = homedir()): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const input of inputs) {
+    if (!isSafeExtraMount(input, home)) continue;
+    const normalized = normalizeMountPath(input, home);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
+}
+
+function isAllowedHomeRemount(input: string, home: string): boolean {
+  const candidate = normalizeMountPath(input, home);
+  return HOME_ALLOW_REMOUNTS.some((path) => isPathWithin(join(home, path), candidate));
+}
+
+/** 构造 Pi reuse 的最小只读文件挂载；缺失文件不制造空凭据文件。 */
+export function buildPiReuseMounts(home = homedir()): string[] {
+  const agentDir = join(home, ".pi", "agent");
+  const files = PI_REUSE_FILES.map((path) => join(home, path)).filter((path) => existsSync(path));
+  if (files.length === 0) return [];
+  return [
+    "--dir",
+    agentDir,
+    ...files.flatMap((path) => ["--ro-bind", path, path]),
+  ];
 }
 
 /** 动态收集 settings.skills 配置的 skill 路径（凡在隐藏目录内需恢复可见；启动时探测一次） */
@@ -95,14 +170,26 @@ export function getMaskSource(): string {
 }
 
 /** 组装 home 隐藏/恢复挂载（基于 / 只读基座；mountHome=false 时整个 home 隐藏） */
-export function buildHomeMounts(home = homedir(), extraAllow: string[] = []): string[] {
+export function buildHomeMounts(
+  home = homedir(),
+  extraAllow: string[] = [],
+  piReuse = false,
+): string[] {
   if (!home || home === "/" || home === "") return [];
   const parts: string[] = [];
   for (const d of SENSITIVE_HOME_DIRS) {
     const p = join(home, d);
     if (existsSync(p)) parts.push("--tmpfs", p);
   }
-  const allow = [...HOME_ALLOW_REMOUNTS.map((r) => join(home, r)), ...extraAllow];
+
+  // --tmpfs ~/.pi 已建立；先创建 agent 父目录，再只读恢复 skills/bin 与可选 Pi reuse 文件。
+  const piReuseMounts = piReuse ? buildPiReuseMounts(home) : [];
+  if (piReuseMounts.length > 0) parts.push(...piReuseMounts.slice(0, 2));
+
+  const allow = [
+    ...HOME_ALLOW_REMOUNTS.map((r) => join(home, r)),
+    ...extraAllow.filter((p) => isAllowedHomeRemount(p, home)).map((p) => normalizeMountPath(p, home)),
+  ];
   const covered = (p: string) =>
     SENSITIVE_HOME_DIRS.some((d) => {
       const dp = join(home, d);
@@ -111,6 +198,9 @@ export function buildHomeMounts(home = homedir(), extraAllow: string[] = []): st
   for (const p of allow) {
     if (p !== home && covered(p) && existsSync(p)) parts.push("--ro-bind", p, p);
   }
+
+  if (piReuseMounts.length > 0) parts.push(...piReuseMounts.slice(2));
+
   for (const f of SENSITIVE_HOME_FILES) {
     const p = join(home, f);
     if (existsSync(p)) parts.push("--ro-bind", getMaskSource(), p);
@@ -121,13 +211,13 @@ export function buildHomeMounts(home = homedir(), extraAllow: string[] = []): st
 /** 构建 bwrap 包装命令（plan 沙箱档的 spawnHook 使用） */
 export function buildBwrapCommand(command: string, root: string, options: BwrapOptions): string {
   const chdir = options?.chdir ?? root;
+  const home = options?.home ?? homedir();
   const parts = ["bwrap", "--die-with-parent"];
   parts.push("--ro-bind", "/", "/");
   if (options?.mountHome === false) {
-    const home = homedir();
     if (home && home !== "/") parts.push("--tmpfs", home);
   } else {
-    parts.push(...buildHomeMounts(undefined, options?.allowRemounts));
+    parts.push(...buildHomeMounts(home, options?.allowRemounts, options?.piReuse));
   }
   parts.push("--tmpfs", "/tmp");
   if (options.profile === "verify") {
@@ -140,8 +230,8 @@ export function buildBwrapCommand(command: string, root: string, options: BwrapO
     parts.push("--ro-bind", root, root);
   }
   if (options?.maskSocketPath) parts.push("--ro-bind", getMaskSource(), options.maskSocketPath);
-  for (const p of options?.extras ?? []) {
-    if (p.trim()) parts.push("--ro-bind", p.trim(), p.trim());
+  for (const p of filterSafeExtraMounts(options?.extras ?? [], home)) {
+    parts.push("--ro-bind", p, p);
   }
   parts.push(options?.unshareNet ? "--unshare-net" : "--share-net");
   parts.push("--chdir", chdir);
@@ -256,6 +346,7 @@ export function sandboxDecision(
         profile: s.safetyMode,
         chdir: cwd,
         mountHome: s.sandbox.mountHome,
+        piReuse: s.sandbox.piReuse,
         maskSocketPath: socketMaskFor(s.sandbox.dockerSocket, s.socketPath, command),
         extras: s.sandbox.extras ?? [],
         allowRemounts: s.allowRemounts ?? [],

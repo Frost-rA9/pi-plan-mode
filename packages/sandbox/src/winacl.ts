@@ -266,6 +266,9 @@ class WinaclBackend implements SandboxBackend {
           const s = ctx.readState();
           const sandboxed = s.mode === "plan" && (s.safetyMode === "readonly" || s.safetyMode === "verify");
           if (!sandboxed) return localPwsh.exec(command, cwd, options);
+          if (s.sandbox.piReuse) {
+            throw new Error("winacl 后端暂不支持 Pi reuse 的精确文件挂载：fail-closed，未执行命令");
+          }
           const profile: "readonly" | "verify" = s.safetyMode === "verify" ? "verify" : "readonly";
           const session = await this.ensureSession(profile, ctx);
           // fail-closed：会话未授权（自检未过/init 失败）即拒绝无限制执行。
