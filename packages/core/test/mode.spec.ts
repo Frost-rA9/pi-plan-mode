@@ -66,14 +66,10 @@ assert.equal("mode" in v3[0] && v3[0].mode, "plan");
 // emptyState 默认 build + readonly
 assert.equal(emptyState().mode, "build");
 assert.equal(emptyState().safetyMode, "readonly");
-assert.equal(emptyState().sandbox.piReuse, false);
+assert.equal(emptyState().sandbox.podmanSocket, true);
+// 旧键 dockerSocket（docker 时代）兼容映射为 podmanSocket。
 assert.equal(
-  foldEvents([{ kind: "sandbox", value: { mountHome: true, dockerSocket: true, extras: [], piReuse: true } }]).sandbox.piReuse,
-  true,
-);
-// 旧 sandbox 事件没有 piReuse 字段时保持默认关闭。
-assert.equal(
-  foldEvents([{ kind: "sandbox", value: { mountHome: true, dockerSocket: true, extras: [] } as any }]).sandbox.piReuse,
+  foldEvents([{ kind: "sandbox", value: { mountHome: true, dockerSocket: false, extras: [] } as any }]).sandbox.podmanSocket,
   false,
 );
 

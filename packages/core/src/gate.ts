@@ -1,13 +1,13 @@
 /**
  * pi-plan-mode · 层 2：交互层门控（按档位路由）。
  *
- * - readonly / verify（OS 沙箱档）：OS 沙箱接管（pi-plan-sandbox 后端）；例外 docker 控制面 fail-closed。
+ * - readonly / verify（OS 沙箱档）：OS 沙箱接管（pi-plan-sandbox 后端）；例外 podman 控制面 fail-closed。
  * - supervised：只读集合自动放行 → 写面拒绝 → 未知命令 confirm（允许一次/此类/拒绝）。
  * - strict：只读集合放行 + 未知拒绝。
  * - 层 0 兜底：edit/write 任何档位都拦截（与工具移除双保险）。
  */
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { classifyDockerWrite, isSandboxedProfile } from "pi-plan-bridge";
+import { classifyPodmanWrite, isSandboxedProfile } from "pi-plan-bridge";
 import type { PlanbuildStore } from "./state.ts";
 import { CONFIRM_LIMIT } from "./config.ts";
 import { classifyBash } from "./classify.ts";
@@ -37,9 +37,9 @@ export function registerGate(pi: ExtensionAPI, store: PlanbuildStore): void {
 
     const sandboxedTier = isSandboxedProfile(store.state.safetyMode) && store.runtime.sandbox.available;
 
-    // docker 控制面（非 win32 bash；win32 沙箱档由 pwsh 沙箱接管，docker 走 winacl 控制面）
-    if (toolName === "bash" && /^docker\b/.test(command.trim()) && classifyDockerWrite(command)) {
-      return { block: true, reason: "docker 写面：切 /build 执行；docker 控制面 fail-closed" };
+    // podman 控制面（非 win32 bash；win32 沙箱档由 pwsh 沙箱接管，podman 走 winacl 控制面）
+    if (toolName === "bash" && /^podman\b/.test(command.trim()) && classifyPodmanWrite(command)) {
+      return { block: true, reason: "podman 写面：切 /build 执行；podman 控制面 fail-closed" };
     }
 
     // OS 沙箱档位：OS 沙箱接管命令执行

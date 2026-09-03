@@ -8,7 +8,7 @@
  */
 import type { BashToolOptions } from "@earendil-works/pi-coding-agent";
 import type { Mode, SandboxBackendInfo, SandboxBackendKind, SandboxShellTool, SafetyMode, SandboxConfig } from "pi-plan-bridge";
-import { probeBwrap, detectDockerSocket, detectSettingsSkills, isSandboxedProfile, sandboxDecision } from "./bwrap.ts";
+import { probeBwrap, detectPodmanSocket, detectSettingsSkills, isSandboxedProfile, sandboxDecision } from "./bwrap.ts";
 import { createWinaclBackend } from "./winacl.ts";
 
 /** 后端构建时的宿主/运行时上下文（registerSandbox 组装，随扩展开销一次） */
@@ -41,7 +41,7 @@ class BwrapBackend implements SandboxBackend {
   }
 
   createToolOptions(ctx: BackendContext): BashToolOptions {
-    const dockerSocketPath = detectDockerSocket();
+    const podmanSocketPath = detectPodmanSocket();
     const settingsSkillPaths = detectSettingsSkills(ctx.cwd);
     return {
       shellPath: ctx.shellPath,
@@ -53,7 +53,7 @@ class BwrapBackend implements SandboxBackend {
             safetyMode: s.safetyMode,
             bwrapAvailable: this.info.available,
             sandbox: s.sandbox,
-            socketPath: dockerSocketPath,
+            socketPath: podmanSocketPath,
             allowRemounts: settingsSkillPaths,
           },
           command,

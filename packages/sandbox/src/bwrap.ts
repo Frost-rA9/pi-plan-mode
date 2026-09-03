@@ -2,7 +2,7 @@
  * pi-planbuild v4 · 层 1 后端：bwrap（Linux 命名空间）OS 只读沙箱。
  *
  * 档位 = 挂载策略参数化：
- * - readonly：工作区只读 + /tmp tmpfs + home 只读（敏感目录隐藏）+ docker.sock 掩码
+ * - readonly：工作区只读 + /tmp tmpfs + home 只读（敏感目录隐藏）+ podman.sock 掩码
  * - verify：  工作区可写（.git/.pi 只读子路径防提权）+ 其余同 readonly——验证式规划
  * - supervised / strict：不注入（交互层接管）
  */
@@ -11,10 +11,9 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import type { Mode, SafetyMode, SandboxConfig } from "pi-plan-bridge";
-import { classifyDockerWrite } from "pi-plan-bridge";
+import { classifyPodmanWrite } from "pi-plan-bridge";
 import {
   HOME_ALLOW_REMOUNTS,
-  PI_REUSE_FILES,
   SENSITIVE_HOME_DIRS,
   SENSITIVE_HOME_FILES,
   WORKSPACE_RO_SUBPATHS,
@@ -51,8 +50,6 @@ export interface BwrapOptions {
   chdir?: string;
   profile: "readonly" | "verify";
   mountHome?: boolean;
-  /** 显式允许挂载 Pi reuse 所需的两个只读元数据文件。 */
-  piReuse?: boolean;
   extras?: string[];
   maskSocketPath?: string;
   allowRemounts?: string[];
@@ -120,18 +117,6 @@ function isAllowedHomeRemount(input: string, home: string): boolean {
   return HOME_ALLOW_REMOUNTS.some((path) => isPathWithin(join(home, path), candidate));
 }
 
-/** 构造 Pi reuse 的最小只读文件挂载；缺失文件不制造空凭据文件。 */
-export function buildPiReuseMounts(home = homedir()): string[] {
-  const agentDir = join(home, ".pi", "agent");
-  const files = PI_REUSE_FILES.map((path) => join(home, path)).filter((path) => existsSync(path));
-  if (files.length === 0) return [];
-  return [
-    "--dir",
-    agentDir,
-    ...files.flatMap((path) => ["--ro-bind", path, path]),
-  ];
-}
-
 /** 动态收集 settings.skills 配置的 skill 路径（凡在隐藏目录内需恢复可见；启动时探测一次） */
 export function detectSettingsSkills(cwd: string): string[] {
   const result: string[] = [];
@@ -170,21 +155,13 @@ export function getMaskSource(): string {
 }
 
 /** 组装 home 隐藏/恢复挂载（基于 / 只读基座；mountHome=false 时整个 home 隐藏） */
-export function buildHomeMounts(
-  home = homedir(),
-  extraAllow: string[] = [],
-  piReuse = false,
-): string[] {
+export function buildHomeMounts(home = homedir(), extraAllow: string[] = []): string[] {
   if (!home || home === "/" || home === "") return [];
   const parts: string[] = [];
   for (const d of SENSITIVE_HOME_DIRS) {
     const p = join(home, d);
     if (existsSync(p)) parts.push("--tmpfs", p);
   }
-
-  // --tmpfs ~/.pi 已建立；先创建 agent 父目录，再只读恢复 skills/bin 与可选 Pi reuse 文件。
-  const piReuseMounts = piReuse ? buildPiReuseMounts(home) : [];
-  if (piReuseMounts.length > 0) parts.push(...piReuseMounts.slice(0, 2));
 
   const allow = [
     ...HOME_ALLOW_REMOUNTS.map((r) => join(home, r)),
@@ -198,8 +175,6 @@ export function buildHomeMounts(
   for (const p of allow) {
     if (p !== home && covered(p) && existsSync(p)) parts.push("--ro-bind", p, p);
   }
-
-  if (piReuseMounts.length > 0) parts.push(...piReuseMounts.slice(2));
 
   for (const f of SENSITIVE_HOME_FILES) {
     const p = join(home, f);
@@ -217,7 +192,7 @@ export function buildBwrapCommand(command: string, root: string, options: BwrapO
   if (options?.mountHome === false) {
     if (home && home !== "/") parts.push("--tmpfs", home);
   } else {
-    parts.push(...buildHomeMounts(home, options?.allowRemounts, options?.piReuse));
+    parts.push(...buildHomeMounts(home, options?.allowRemounts));
   }
   parts.push("--tmpfs", "/tmp");
   if (options.profile === "verify") {
@@ -284,9 +259,9 @@ export function detectShellPath(cwd: string): string | undefined {
   return value === undefined ? undefined : normalizeShellPath(value);
 }
 
-/** 探测宿主 docker unix socket 真实路径（realpath 解开符号链接；DOCKER_HOST 优先） */
-export function detectDockerSocket(candidates?: readonly string[]): string | undefined {
-  const list = candidates ?? dockerSocketCandidates();
+/** 探测宿主 podman unix socket 真实路径（realpath 解开符号链接；PODMAN_HOST/CONTAINER_HOST 优先） */
+export function detectPodmanSocket(candidates?: readonly string[]): string | undefined {
+  const list = candidates ?? podmanSocketCandidates();
   for (const p of list) {
     if (existsSync(p)) {
       try {
@@ -299,11 +274,14 @@ export function detectDockerSocket(candidates?: readonly string[]): string | und
   return undefined;
 }
 
-function dockerSocketCandidates(): string[] {
-  const host = process.env.DOCKER_HOST;
+function podmanSocketCandidates(): string[] {
+  // podman rootless 默认：$XDG_RUNTIME_DIR/podman/podman.sock（systemd 或 pasta 转发时）；
+  // docker-compat socket（podman machine / 远程连接）在 /run/user/<uid>/docker.sock。
+  const host = process.env.PODMAN_HOST ?? process.env.CONTAINER_HOST;
   if (host?.startsWith("unix://")) return [host.slice("unix://".length)];
   const uid = typeof process.getuid === "function" ? process.getuid() : 1000;
-  return ["/var/run/docker.sock", "/run/docker.sock", `/run/user/${uid}/docker.sock`];
+  const runtimeDir = process.env.XDG_RUNTIME_DIR ?? `/run/user/${uid}`;
+  return [`${runtimeDir}/podman/podman.sock`, `${runtimeDir}/docker.sock`, `/run/user/${uid}/podman/podman.sock`];
 }
 
 /** spawnHook 决策输入（便于纯函数测试） */
@@ -321,15 +299,15 @@ export function isSandboxedProfile(safetyMode: SafetyMode): safetyMode is "reado
   return safetyMode === "readonly" || safetyMode === "verify";
 }
 
-/** docker.sock 可见性决策（纯函数）：默认掩码，仅 docker 只读子命令放行 */
+/** podman.sock 可见性决策（纯函数）：默认掩码，仅 podman 只读子命令放行 */
 export function socketMaskFor(
   enabled: boolean,
   socketPath: string | undefined,
   command: string,
 ): string | undefined {
   if (!socketPath) return undefined;
-  const isDocker = /^docker\b/.test(command.trim());
-  if (isDocker && enabled && !classifyDockerWrite(command)) return undefined;
+  const isPodman = /^podman\b/.test(command.trim());
+  if (isPodman && enabled && !classifyPodmanWrite(command)) return undefined;
   return socketPath;
 }
 
@@ -346,8 +324,7 @@ export function sandboxDecision(
         profile: s.safetyMode,
         chdir: cwd,
         mountHome: s.sandbox.mountHome,
-        piReuse: s.sandbox.piReuse,
-        maskSocketPath: socketMaskFor(s.sandbox.dockerSocket, s.socketPath, command),
+        maskSocketPath: socketMaskFor(s.sandbox.podmanSocket, s.socketPath, command),
         extras: s.sandbox.extras ?? [],
         allowRemounts: s.allowRemounts ?? [],
       }),

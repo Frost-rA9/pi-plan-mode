@@ -1,6 +1,7 @@
 /**
  * pi-planbuild v4 · 命令：/plan /build /plan-safety /plan-sandbox + 启动 flag（plan/plan-safety/plan-file/plan-mount）。
- * `plan-sandbox pi-reuse on` 为 ModLens reuse.pi 提供显式、最小文件挂载。
+ * piReuse 已移除（ModLens 改用独立 provider，Plan shell 不再暴露 pi 凭据）；
+ * podman 控制面 fail-closed 保留。
  */
 import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isSafetyMode, requiresSandbox, type SafetyMode, type CapabilityId } from "pi-plan-bridge";
@@ -106,17 +107,16 @@ export function registerCommands(
   });
 
   pi.registerCommand("plan-sandbox", {
-    description: "查看/配置沙箱挂载（home 只读 / docker.sock / Pi reuse / 附加路径）",
+    description: "查看/配置沙箱挂载（home 只读 / podman.sock / Pi reuse / 附加路径）",
     handler: async (args, ctx) => {
       const usage =
-        "用法: /plan-sandbox [mount-home on|off | docker on|off | pi-reuse on|off | add <path> | remove <path>]";
+        "用法: /plan-sandbox [mount-home on|off | podman on|off | add <path> | remove <path>]";
       const arg = args?.trim() ?? "";
       if (!arg) {
         ctx.ui.notify(
           `沙箱挂载配置（OS 沙箱档位 readonly/verify 生效）：\n` +
             `- home 只读（含敏感目录隐藏）: ${store.state.sandbox.mountHome ? "开" : "关"}\n` +
-            `- docker.sock: ${store.state.sandbox.dockerSocket ? "开" : "关"}（只读子命令放行，写子命令拦截）\n` +
-            `- Pi reuse 文件: ${store.state.sandbox.piReuse ? "开" : "关"}（只读挂载 auth.json/models-store.json；Plan shell 可读取凭据）\n` +
+            `- podman.sock: ${store.state.sandbox.podmanSocket ? "开" : "关"}（只读子命令放行，写子命令拦截）\n` +
             `- 附加只读挂载: ${store.state.sandbox.extras.length > 0 ? store.state.sandbox.extras.join(", ") : "（无）"}`,
           "info",
         );
@@ -135,28 +135,12 @@ export function registerCommands(
       } else if (cmd === "remove" && val) {
         const normalized = normalizeMountPath(val);
         s.extras = s.extras.filter((p) => normalizeMountPath(p) !== normalized);
-      } else if (cmd === "pi-reuse" && (val === "on" || val === "off")) {
-        if (val === "on" && process.platform === "win32") {
-          ctx.ui.notify("当前 Windows winacl 后端尚不支持 Pi reuse 的精确文件挂载，已拒绝启用。", "error");
-          return;
-        }
-        if (val === "on" && !s.piReuse) {
-          const confirmed = await ctx.ui.confirm(
-            "启用 Pi reuse？",
-            "Plan shell 将只读看到 ~/.pi/agent/auth.json 和 models-store.json，其中 auth.json 含凭据。是否继续？",
-          );
-          if (!confirmed) {
-            ctx.ui.notify("已取消启用 Pi reuse", "info");
-            return;
-          }
-        }
-        s.piReuse = val === "on";
-      } else if ((cmd === "mount-home" || cmd === "docker") && val === "on") {
+      } else if ((cmd === "mount-home" || cmd === "podman") && val === "on") {
         if (cmd === "mount-home") s.mountHome = true;
-        else s.dockerSocket = true;
-      } else if ((cmd === "mount-home" || cmd === "docker") && val === "off") {
+        else s.podmanSocket = true;
+      } else if ((cmd === "mount-home" || cmd === "podman") && val === "off") {
         if (cmd === "mount-home") s.mountHome = false;
-        else s.dockerSocket = false;
+        else s.podmanSocket = false;
       } else {
         ctx.ui.notify(usage, "error");
         return;

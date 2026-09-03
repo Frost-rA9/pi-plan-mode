@@ -4,7 +4,7 @@
  * 为 pi-plan-{mode,sandbox,preview,question} 提供：
  * - 类型：Mode/SafetyMode/SandboxBackendKind/SandboxShellTool/SandboxBackendInfo/SandboxConfig/PlanReviewChoice/PlanSummary
  * - 能力接口：SafetyProvider / PlanPreviewRenderer / QuestionAsker（依赖倒置——库实现它，mode 经它调用）
- * - 共享纯函数/常量：classifyDockerWrite + docker 常量、formatPlanSummary、requiresSandbox/isSandboxedProfile/isSafetyMode/DEFAULT_SAFETY_MODE
+ * - 共享纯函数/常量：classifyPodmanWrite + podman 常量、formatPlanSummary、requiresSandbox/isSandboxedProfile/isSafetyMode/DEFAULT_SAFETY_MODE
  *
  * 架构（路线 A）：单一宿主（pi-plan-mode 扩展）import 全部能力库（sandbox/preview/question），
  * 无需事件总线 RPC——能力都是可注入库，mode 直接调用。可插拔 = 换库包（npm 依赖）。
@@ -58,10 +58,9 @@ export interface SandboxBackendInfo {
 /** 沙箱配置（whole-value replace 事件携带完整配置） */
 export interface SandboxConfig {
   mountHome: boolean;
-  dockerSocket: boolean;
+  /** 允许 Plan shell 访问 container 控制面（podman socket；readonly/verify 档仅读子命令放行）。 */
+  podmanSocket: boolean;
   extras: string[];
-  /** 显式允许 Plan shell 只读看到 ModLens/Pi 复用所需的 auth/model 文件。 */
-  piReuse: boolean;
 }
 
 /** plan_mode_complete 三分支结果：approve=批准并执行 / continue=继续规划 / undefined=dismissed */
@@ -126,63 +125,56 @@ export interface QuestionAsker {
   ask(ctx: ExtensionContext, questions: QuestionSpec[]): Promise<QuestionAnswer[]>;
 }
 
-/* ------------------------------ docker 控制面（sandbox 与 mode 共用；纯函数/常量） ------------------------------ */
+/* ------------------------------ podman 控制面（sandbox 与 mode 共用；纯函数/常量） ------------------------------ */
 
-/** docker 顶层只读子命令（白名单外一律拦截：fail-closed） */
-export const DOCKER_READONLY_SUBCOMMANDS: ReadonlySet<string> = new Set([
+/** podman 顶层只读子命令（白名单外一律拦截：fail-closed） */
+export const PODMAN_READONLY_SUBCOMMANDS: ReadonlySet<string> = new Set([
   "ps", "info", "version", "images", "logs", "inspect", "stats", "top", "port", "events",
-  "history", "diff", "ls", "df", "scan", "sbom",
+  "history", "diff", "ls", "search", "manifest",
 ]);
 
-/** docker 复合子命令（两段式）的只读第二段 */
-export const DOCKER_READONLY_COMPOSED: Record<string, ReadonlySet<string>> = {
+/** podman 复合子命令（两段式）的只读第二段 */
+export const PODMAN_READONLY_COMPOSED: Record<string, ReadonlySet<string>> = {
   compose: new Set(["ps", "config", "ls", "top", "events", "logs", "images", "version"]),
-  network: new Set(["ls", "inspect"]),
-  volume: new Set(["ls", "inspect"]),
-  system: new Set(["df", "info", "events", "inspect"]),
-  builder: new Set(["ls", "inspect"]),
-  buildx: new Set(["ls", "inspect"]),
-  container: new Set(["ls", "inspect", "stats", "top", "port", "diff", "logs"]),
-  image: new Set(["ls", "inspect", "history"]),
-  secret: new Set(["ls", "inspect"]),
-  config: new Set(["ls", "inspect"]),
-  plugin: new Set(["ls", "inspect"]),
-  context: new Set(["ls", "inspect", "show"]),
-  node: new Set(["ls", "inspect"]),
-  service: new Set(["ls", "inspect", "logs", "ps"]),
-  stack: new Set(["ls", "ps", "config"]),
-  manifest: new Set(["inspect"]),
-  trust: new Set(["inspect", "signer"]),
+  network: new Set(["ls", "inspect", "exists"]),
+  volume: new Set(["ls", "inspect", "exists"]),
+  system: new Set(["df", "info", "events"]),
+  image: new Set(["ls", "inspect", "exists", "history", "tree"]),
+  container: new Set(["ls", "inspect", "exists", "stats", "top", "port", "diff", "logs", "ps"]),
+  pod: new Set(["exists", "inspect", "ps", "stats", "top"]),
+  machine: new Set(["inspect", "list"]),
 };
 
-/** docker 全局带值 flag（跳过其值 token，避免把 flag 值误当子命令） */
-export const DOCKER_VALUE_FLAGS: ReadonlySet<string> = new Set([
-  "--context", "-c", "--host", "-H", "--config", "--log-level",
-  "--tlscacert", "--tlscert", "--tlskey",
+/** podman 全局带值 flag（跳过其值 token，避免把 flag 值误当子命令） */
+export const PODMAN_VALUE_FLAGS: ReadonlySet<string> = new Set([
+  "--connection", "-c", "--url", "--identity", "--log-level", "--root", "--runroot",
+  "--storage-driver", "--cgroup-manager", "--events-backend", "--runtime",
 ]);
 
-function dockerTopSubcommand(tokens: string[]): string {
+function podmanTopSubcommand(tokens: string[]): string {
   let i = 0;
-  while (i < tokens.length && DOCKER_VALUE_FLAGS.has(tokens[i])) i += 2;
+  while (i < tokens.length && PODMAN_VALUE_FLAGS.has(tokens[i])) i += 2;
   return tokens[i] ?? "";
 }
 
 /**
- * 判定 docker 命令是否写面：顶层子命令 ∈ 只读白名单 → false；否则（含未知）→ true（fail-closed）。
- * 两段式（如 `docker compose ps`）取第二段判定。
+ * 判定 podman 命令是否写面：顶层子命令 ∈ 只读白名单 → false；否则（含未知）→ true（fail-closed）。
+ * 两段式（如 `podman compose ps`）取第二段判定。
  */
-export function classifyDockerWrite(command: string): boolean {
+export function classifyPodmanWrite(command: string): boolean {
   const trimmed = command.trim();
-  const m = trimmed.match(/^docker\s+(.+)$/);
+  const m = trimmed.match(/^podman\s+(.+)$/);
   if (!m) return true;
   const tokens = m[1].split(/\s+/);
-  const top = dockerTopSubcommand(tokens);
+  const top = podmanTopSubcommand(tokens);
   if (!top) return true;
-  const composed = DOCKER_READONLY_COMPOSED[top];
+  const composed = PODMAN_READONLY_COMPOSED[top];
   if (composed) {
     const sub = tokens[tokens.indexOf(top) + 1] ?? "";
-    return !composed.has(sub);
+    if (!composed.has(sub)) return true;
+    // 复合只读子命令不接受额外参数（如 `podman volume ls --json` 除外——留白名单内所有 flag）。
+    return false;
   }
-  if (DOCKER_READONLY_SUBCOMMANDS.has(top)) return false;
+  if (PODMAN_READONLY_SUBCOMMANDS.has(top)) return false;
   return true;
 }

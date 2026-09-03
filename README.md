@@ -7,7 +7,7 @@
 ## 包结构（`packages/*`）
 
 ```text
-bridge    契约：类型 + 能力接口（SafetyProvider / PlanPreviewRenderer / QuestionAsker）+ 共享纯函数（classifyDockerWrite、formatPlanSummary…）
+bridge    契约：类型 + 能力接口（SafetyProvider / PlanPreviewRenderer / QuestionAsker）+ 共享纯函数（classifyPodmanWrite、formatPlanSummary…）
 core      唯一 pi 扩展（workspace 包名 `pi-plan-core`，扩展显示名 `pi-plan-mode`）：状态折叠/模式切换/plan_file/plan_mode_complete/build_status/命令/gate + 能力注册
 sandbox   OS 沙箱库：bwrap（Linux/WSL2）、winacl（Windows 受限令牌 + NTFS ACE，shell=pwsh，win32/ FFI）。被 core import
 preview   计划预览库：启发式摘要（首标题 + 要点前 N 条 + 步骤数/行数）。被 core import
@@ -46,7 +46,7 @@ pi --plan-capabilities-question=my-ask  # 替换 question 实现
 - **计划文件即真源**：规划产物入 `.pi/plans/PLAN.md`，无内存镜像。
 - **批准三分支**：批准并执行（写计划文件 + 切 build）/ 继续规划 / `dismissed`（ESC = 留 plan 等指示）。
 - **安全档位**（`/plan-safety`）：`readonly`（默认，OS 只读沙箱）/ `verify`（工作区可写）/ `supervised`（无沙箱+confirm）/ `strict`（无沙箱+拒绝）。沙箱不可用自动降级 `supervised`（fail-closed，决不无限制执行）。
-- **沙箱挂载**（`/plan-sandbox`）：查看/更新沙箱额外挂载与掩码；`/plan-sandbox pi-reuse on` 经确认后只读开放 Pi reuse 所需的 `auth.json`/`models-store.json`，不开放整个 `~/.pi`。
+- **沙箱挂载**（`/plan-sandbox`）：查看/更新沙箱额外挂载与掩码（podman 控制面；只读子命令放行、写子命令拦截，fail-closed）。
 
 ## 安装 / 本地调试
 
@@ -68,5 +68,5 @@ npm test                 # 跑全部 workspace 测试（各包 test/*.spec.ts）
 
 - **插拔方式一致**：所有能力 = 库，mode 经统一 loader（`loadCapabilities`）按需加载/替换，契约在 bridge。
 - **关键约束**：`BashSpawnHook` 是同步的 → sandbox 不能做成扩展，只能作为被 mode import 的库（mode 注入 `readState`）；故不采用多扩展 + 事件总线 RPC（`rpcRequest/rpcServe` 已弃）。
-- 单源：类型/纯函数/`classifyDockerWrite` 在 bridge；安全清单在 sandbox；交互层配置在 mode。
+- 单源：类型/纯函数/`classifyPodmanWrite` 在 bridge；安全清单在 sandbox；交互层配置在 mode。
 - 不变量：真实 OS 隔离靠 OS/虚拟化边界；fail-closed；模型不能自切模式；dismissed ≠ rejected；计划文件真源；最小暴露面。

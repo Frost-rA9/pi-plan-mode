@@ -1,6 +1,6 @@
 /**
  * pi-plan-mode · 交互层配置：只读集合 / 写面模式 / confirm 上限。
- * （安全清单已下沉 pi-plan-sandbox；docker 常量已上移 pi-plan-bridge。）
+ * （安全清单已下沉 pi-plan-sandbox；podman 常量已上移 pi-plan-bridge。）
  */
 
 /** 会话内 confirm 频率上限（防确认疲劳；会话内存语义，不持久化） */

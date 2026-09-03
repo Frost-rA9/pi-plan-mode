@@ -11,7 +11,6 @@ export const SENSITIVE_HOME_DIRS = [
   ".aws",
   ".gnupg",
   ".kube",
-  ".docker",
   ".netrc",
   ".config", // 含 pi-agent 配置（sudo 密码 env）、gh token 等
   ".pi", // 含 auth.json 等凭据（skills/bin 由 HOME_ALLOW_REMOUNTS 恢复）
@@ -23,9 +22,6 @@ export const SENSITIVE_HOME_FILES = [".gitconfig", ".bash_history", ".netrc", ".
 
 /** 敏感目录覆盖后仍需可见的子路径（bwrap 后挂载恢复；winacl 细粒度 deny） */
 export const HOME_ALLOW_REMOUNTS = [".pi/agent/skills", ".pi/agent/bin", ".config/gh"] as const;
-
-/** ModLens reuse.pi 在 Plan shell 中探测/调用 Pi 所需的最小文件集合。 */
-export const PI_REUSE_FILES = [".pi/agent/auth.json", ".pi/agent/models-store.json"] as const;
 
 /** verify 档写面保护：工作区可写，但以下相对路径保持只读（防 hook/配置提权）。 */
 export const WORKSPACE_RO_SUBPATHS = [".git", ".pi"] as const;
