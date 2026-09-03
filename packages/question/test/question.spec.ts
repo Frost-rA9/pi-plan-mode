@@ -3,7 +3,7 @@
  * 运行：node --experimental-strip-types test/question.spec.ts
  */
 import assert from "node:assert/strict";
-import { askUserQuestion } from "../src/index.ts";
+import { askUserQuestion, buildSelectOptions, stripRecommendedSuffix } from "../src/index.ts";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 function mockCtx(selectResults: string[], inputResults: string[]): { ctx: ExtensionContext; ui: any } {
@@ -60,4 +60,42 @@ function mockCtx(selectResults: string[], inputResults: string[]): { ctx: Extens
   assert.equal(res[0].kind, "cancel");
 }
 
-console.log("✅ question: askUserQuestion (choice/recommended/custom/multi/cancel)");
+// 5) 回归（真机 bug 复现）：模型把「（推荐）」后缀和「其他（自行输入）」写进 options ——
+//    select 不出现双「（推荐）」、不出现双「其他（自行输入）」。
+{
+  const dirtyOptions = [
+    "批准并执行后立即显示一次notice，并标记已消费；后续对话不再显示（推荐）",
+    "保持在批准后的下一次模型回合显示一次；批准当下不立即显示",
+    "其他（自行输入）",
+  ];
+  const dirtyRecommended = "批准并执行后立即显示一次notice，并标记已消费；后续对话不再显示（推荐）";
+  const shown = buildSelectOptions(dirtyOptions, dirtyRecommended);
+  assert.equal(shown.filter((o) => o.includes("（推荐）")).length, 1); // 只标注一次
+  assert.equal(shown.filter((o) => o === "其他（自行输入）").length, 1); // 只出现一次
+  assert.equal(shown[0], "批准并执行后立即显示一次notice，并标记已消费；后续对话不再显示（推荐）");
+  // 端到端：mock select 选中推荐项 → 答案剥离后缀。
+  const { ctx } = mockCtx([shown[0]], []);
+  const res = await askUserQuestion(ctx, [
+    { question: "q", options: dirtyOptions, recommended: dirtyRecommended },
+  ]);
+  assert.equal(res[0].kind, "choice");
+  assert.equal(res[0].value, "批准并执行后立即显示一次notice，并标记已消费；后续对话不再显示");
+}
+
+// 6) buildSelectOptions：重复选项去重 + 空值过滤。
+{
+  const shown = buildSelectOptions(["方案A", "方案A", "", undefined as unknown as string, "方案B（推荐）"], "方案B");
+  assert.equal(shown.length, 3);
+  assert.ok(shown.includes("方案A"));
+  assert.ok(shown.includes("方案B（推荐）"));
+  assert.ok(shown.includes("其他（自行输入）"));
+}
+
+// 7) stripRecommendedSuffix 纯函数。
+{
+  assert.equal(stripRecommendedSuffix("x（推荐）"), "x");
+  assert.equal(stripRecommendedSuffix("x（推荐）"), "x");
+  assert.equal(stripRecommendedSuffix("y"), "y");
+}
+
+console.log("✅ question: askUserQuestion (choice/recommended/custom/multi/cancel/dirty-options)");

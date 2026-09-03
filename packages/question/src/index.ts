@@ -8,21 +8,54 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { QuestionAsker, QuestionAnswer, QuestionSpec } from "pi-plan-bridge";
 
 const OTHERS = "其他（自行输入）";
+const RECOMMENDED_SUFFIX = "（推荐）";
+
+/** 剥掉选项文本末尾的「（推荐）」标注（比较与答案清洗共用；容忍模型传入时已带后缀）。 */
+export function stripRecommendedSuffix(text: string): string {
+  return text.endsWith(RECOMMENDED_SUFFIX) ? text.slice(0, -RECOMMENDED_SUFFIX.length) : text;
+}
+
+/**
+ * 构造 select 显示选项：
+ * - 选项去重（含模型误传的「其他（自行输入）」）；
+ * - recommended 命中时只追加一次「（推荐）」——无论 options 文本是否已带后缀；
+ * - 「其他（自行输入）」由系统统一追加，选项已含时不重复。
+ */
+export function buildSelectOptions(options: string[], recommended?: string): string[] {
+  const seen = new Set<string>();
+  const labeled: string[] = [];
+  for (const raw of options) {
+    if (!raw || typeof raw !== "string") continue;
+    const stripped = stripRecommendedSuffix(raw);
+    const dedupKey = stripped === OTHERS || raw === OTHERS ? "__others__" : stripped;
+    if (seen.has(dedupKey)) continue;
+    seen.add(dedupKey);
+    const isRecommended = recommended !== undefined && stripped === stripRecommendedSuffix(recommended);
+    labeled.push(isRecommended ? `${stripped}${RECOMMENDED_SUFFIX}` : stripped);
+  }
+  if (!seen.has("__others__")) {
+    seen.add("__others__");
+    labeled.push(OTHERS);
+  } else if (!labeled.some((o) => o === OTHERS)) {
+    // 模型可能把「其他（自行输入）」传成带变体的选项（如空格），确保始终有标准 OTHERS 供匹配。
+    labeled.push(OTHERS);
+  }
+  return labeled;
+}
 
 /** 核心逻辑：逐题 select（标推荐项）+ 「其他」→ input 自由文本。可单测（mock ui）。 */
 export function askUserQuestion(ctx: ExtensionContext, questions: QuestionSpec[]): Promise<QuestionAnswer[]> {
   const answers: QuestionAnswer[] = [];
   const run = async (): Promise<QuestionAnswer[]> => {
     for (const q of questions) {
-      const labeled = q.options.map((o) => (q.recommended && o === q.recommended ? `${o}（推荐）` : o));
-      const choice = await ctx.ui.select(q.question, [...labeled, OTHERS]);
+      const choice = await ctx.ui.select(q.question, buildSelectOptions(q.options, q.recommended));
       if (choice === OTHERS) {
         const custom = await ctx.ui.input(q.question, "请输入你的回答（ESC 取消）…");
         answers.push(
           custom?.trim() ? { kind: "custom", value: custom.trim() } : { kind: "cancel", value: "（取消）" },
         );
       } else if (choice) {
-        answers.push({ kind: "choice", value: choice.replace(/（推荐）$/, "") });
+        answers.push({ kind: "choice", value: stripRecommendedSuffix(choice) });
       } else {
         answers.push({ kind: "cancel", value: "（取消）" });
       }
@@ -47,7 +80,9 @@ export function registerQuestionTool(pi: ExtensionAPI): void {
     name: "ask_user_question",
     label: "向用户提问",
     description:
-      "向用户提出结构化选择题（最多 3 个问题，每个 2-4 个互斥选项，给每个标注推荐项）。每个问题额外提供「其他（自行输入）」选项，用户可选它打自定义答案。用于澄清高影响取舍。",
+      "向用户提出结构化选择题（最多 3 个问题，每个 2-4 个互斥选项；每个问题可给一个 recommended 标注推荐项）。" +
+      "options 与 recommended 只传纯选项文本（不要自带「（推荐）」后缀）；「其他（自行输入）」选项由系统自动追加，不要写入 options。" +
+      "用于澄清高影响取舍，用户可改选「其他」打自定义答案。",
     promptSnippet: "结构化澄清",
     parameters: Type.Object({
       questions: Type.Array(
