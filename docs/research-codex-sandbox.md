@@ -54,3 +54,13 @@ codex Linux 沙箱 =
 2. **实际缺口已修**：verify 档写保护路径单源化（`WORKSPACE_RO_SUBPATHS`）。
 3. **遗留（Windows 真机）**：probe 自检补 deny-read 生效断言（受限 token 读 `~/.ssh/` 应失败）。
 4. **可选深防（暂缓）**：pi bwrap 加 seccomp + no_new_privs 纵深层（codex 同款），成本小收益明确，但不影响主路径。
+
+---
+
+## 五、P4（win32 路径转换边界修正）——待 Windows 环境
+
+**来源**：codex `7a7c188` "Preserve target-native paths in command approvals"——批准请求保留执行目标原生路径（PathUri），不转换 host 路径；native-path helpers 须 executor-aware（接收 `FileSystemSandboxPolicyContext`）。
+
+**对 pi 的意义**：`normalizeShellPath` 在 win32/宿主间转换（`/c/Users/x/bash.exe` ↔ `C:\Users\x\bash.exe`），转换可能引入边界模糊（`/mnt/c/...` vs `C:\...` 判定不一致）。
+
+**状态**：**暂缓**。Windows 宿主机系统重装后尚未安装 pi/pi-plan-mode 环境，无法真机验证——此修正须在真实 Windows 环境调试（无真机验证的路径转换修改更危险）。
