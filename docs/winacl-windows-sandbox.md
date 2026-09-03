@@ -62,3 +62,25 @@
 4. **弃 standing 刷 / 每会话重建**：工作区/temp/敏感路径的 ACE 每次会话建立，`dispose` 逐恢复（不保留跨会话 standing 缓存）。
 5. **`overrideWinaclProbe` 测试接缝**：与 bwrap `overrideBwrapDetect` 同模式，供 `test/smoke.ts` 在 win32 上控制后端可用性（C2 降级用例）。
 6. **敏感 readDenyTargets 排除宿主必需目录**：`.pi`/`.config`/`.copilot` 含 pi 自身 auth/config（宿主必需），不加入用户 SID deny-read；仅纯凭据存储（`.ssh`/`.aws`/`.gnupg`/`.kube`/`.docker`/`.netrc`/`.gitconfig`/`.bash_history`/`.npmrc`）被隐藏。
+
+---
+
+## 附：v3 → v4 设计演进史（2026-09 归档自根 AGENTS.md）
+
+### v3 失败（真机证伪）
+v3 目标「原生 Windows readonly/verify 走受限令牌（winacl）」在 **Windows 26200 + git bash（MSYS2）** 真机被证伪：
+- `cmd.exe` under 受限令牌 ✅；**MSYS2 bash under 受限令牌 ❌**（`cygheap_user::init: NtSetInformationToken(TokenDefaultDacl), 0xC0000022`；挂起 `CreateFileMapping`）。
+- 结论：受限令牌 × Cygwin/MSYS2 **固有不兼容**（Cygwin 初始化必须调 `NtSetInformationToken(TokenDefaultDacl)`，Windows 对任何受限令牌拒绝）。机制性冲突，非参数可绕过。
+
+### 关键洞察：git bash 不是固定 shell
+v3 隐含前提「Windows 沙箱 shell = git bash」不成立——pi 原生提供 **`powershell` 工具**（`createPowerShellTool`，与 bash 同款 `operations`/`spawnHook` 接缝；`PowerShellOperations = BashOperations`；`defaultTools` 可启用）。运行时 pi ≥0.84.4 导出 `createPowerShellTool`/`createLocalPowerShellOperations`（0.84.1 无）。
+
+### v4（路线 X）结论
+**原生 Windows readonly/verify 走 winacl，但沙箱 shell 用 pwsh**（`createPowerShellTool` 承载 `operations.exec`）；Linux/WSL2 走 bwrap。无 WSL2 依赖、无 `/mnt` 跨边界、原生 Windows。
+
+### 三段式判定（路线 X）
+1. **pi 原生机制** ✅：pi 无内置沙箱，但提供 `powershell` 工具 + `createPowerShellTool` 的 `operations`/`spawnHook` 接缝 + `defaultTools`/`setActiveTools`。零新 pi API。
+2. **四家语义** ✅：受限令牌 + capability SID + NTFS ACE 写白名单（+deny-read）——dsh 真机 pwsh 实测；Codex 同族（deny-read 语义）；enforcement=partial。
+3. **pi 裁剪** ✅：dsh 式 TS+koffi 免提权 + Codex deny-read（凭据隐藏）；**不引入提权 helper / WFP / 独立 logon 身份**。取舍明示：enforcement=partial（弱于 bwrap）；Windows 沙箱档只能用 pwsh（bash 被移除）。
+
+**后置**：win32 原生 FFI 须在真实 Windows 自检（含 pwsh-under-token 冒烟）通过才启用；否则 fail-closed 降级 supervised。

@@ -34,7 +34,7 @@ import {
   createRestrictedToken, currentUserSid, findLogonSid, makeWellKnownSid,
   openCurrentProcessToken, setTokenDefaultDaclGrant,
 } from "./token.ts";
-import { win32SensitivePaths } from "../config.ts";
+import { win32SensitivePaths, WORKSPACE_RO_SUBPATHS } from "../config.ts";
 import type { WinaclSession, WinaclSessionOptions } from "./index.ts";
 
 /** 创建受限令牌 + 授权所必需的子进程 SID（CreateProcessAsUserW 权限）。 */
@@ -160,8 +160,8 @@ export class WinaclSessionImpl implements WinaclSession {
       this.writeSidPtr = wsSid;
       // 工作区写授权（根授予，子项继承）。
       this.modifyAcl(this.workspace, (a) => grantWrite(a, this.workspace, wsSid));
-      // .git / .pi 只读（deny 先于 allow）。
-      for (const ro of [".git", ".pi"] as const) {
+      // 工作区只读子路径（.git/.pi；deny 先于 allow）。
+      for (const ro of WORKSPACE_RO_SUBPATHS) {
         const p = join(this.workspace, ro);
         if (existsSync(p)) this.modifyAcl(p, (a) => denyWrite(a, p, wsSid));
       }
