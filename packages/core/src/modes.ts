@@ -62,6 +62,8 @@ export function primeNoticeBaseline(notifiedMode: Mode | undefined, oldMode: Mod
 export interface ModeActions {
   enterPlanMode(ctx: ExtensionContext, persist?: boolean): void;
   enterBuildMode(ctx: ExtensionContext, persist?: boolean): void;
+  /** 在当前 agent 回合即时显示一次模式切换 notice，并消费防抖标记。 */
+  announceModeNotice(): void;
   ensureBuildTools(): void;
   updateStatus(ctx: ExtensionContext): void;
 }
@@ -129,6 +131,27 @@ export function registerModes(
     updateStatus(ctx);
   }
 
+  /**
+   * 在当前 agent 回合即时告知模式切换。
+   *
+   * `before_agent_start` 只在下一次用户 prompt 开始时触发；批准分支发生在当前
+   * agent loop 的工具回合内，因此这里用 pi 原生 custom message 排到当前工具批次
+   * 之后。先消费 notifiedMode，避免下一条 build prompt 再重复注入同一 notice。
+   */
+  function announceModeNotice(): void {
+    const mode = store.state.mode;
+    if (store.runtime.notifiedMode === mode) return;
+    store.runtime.notifiedMode = mode;
+    pi.sendMessage(
+      {
+        customType: `${PB_ENTRY_TYPE}:mode-notice`,
+        content: modeNoticeContent(mode),
+        display: true,
+      },
+      { deliverAs: "steer" },
+    );
+  }
+
   function ensureBuildTools(): void {
     const current = pi.getActiveTools();
     pi.setActiveTools(unique([...current, "edit", "write"]));
@@ -159,7 +182,7 @@ export function registerModes(
     return result;
   });
 
-  return { enterPlanMode, enterBuildMode, ensureBuildTools, updateStatus };
+  return { enterPlanMode, enterBuildMode, announceModeNotice, ensureBuildTools, updateStatus };
 }
 
 // 兼容导出（gate.ts 兜底 edit/write 拦截时复用）

@@ -89,8 +89,9 @@ export function registerTools(
 
       if (decision === "approve") {
         await writePlanFile(target, params.plan); // 计划文件即真源（agent 生成原文，用户不改）
-        store.setMode("build");
         modes.enterBuildMode(ctx);
+        // 批准发生在当前 agent 回合内：即时显示一次，后续 build prompt 不重复。
+        modes.announceModeNotice();
         return textResult(`计划已批准并写入 ${target}：\n${params.plan}`);
       }
       if (decision === "continue") {

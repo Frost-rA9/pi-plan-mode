@@ -4,7 +4,12 @@
  * 运行：node --experimental-strip-types test/mode.spec.ts
  */
 import assert from "node:assert/strict";
-import { shouldUsePowershellSandbox, shouldInjectModeNotice, modeNoticeContent, primeNoticeBaseline } from "../src/modes.ts";
+import { unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { registerModes, shouldUsePowershellSandbox, shouldInjectModeNotice, modeNoticeContent, primeNoticeBaseline } from "../src/modes.ts";
+import { PlanbuildStore } from "../src/state.ts";
+import { registerTools } from "../src/tools.ts";
 import { buildPreviewMarkdown, PREVIEW_MAX_CHARS } from "../src/preview.ts";
 import { classifyBash, scanPipeline } from "../src/classify.ts";
 import { foldEvents, parsePbEvents, PB_ENTRY_TYPE, emptyState } from "../src/events.ts";
@@ -92,16 +97,89 @@ n2 = primeNoticeBaseline(n2, "plan"); // /build 切换时补基线（oldMode=恢
 assert.equal(shouldInjectModeNotice("build", n2), true); // 首回合注入 ✅
 
 // —— 场景 3（T4）序列：启动默认 build → 未对话 /plan（基线=build）→ 首回合（plan）注入 →
-//    回合中 plan_mode_complete 批准切 build（基线不动）→ 下一回合（build）注入 → 再下回合防抖 ——
+//    回合中 plan_mode_complete 批准切 build → 当前回合即时 notice 并消费 → 后续 build 防抖 ——
 let n3: "plan" | "build" | undefined = undefined;
 n3 = primeNoticeBaseline(n3, "build"); // 启动默认 build，未对话 /plan
 assert.equal(shouldInjectModeNotice("plan", n3), true); // 首回合（plan）注入：已切到 plan
 n3 = "plan"; // before_agent_start 写入
-n3 = primeNoticeBaseline(n3, "plan"); // 回合中批准 → enterBuildMode：已有值不动
+n3 = primeNoticeBaseline(n3, "plan"); // 回合中批准 → enterBuildMode：基线不动
 assert.equal(n3, "plan");
-assert.equal(shouldInjectModeNotice("build", n3), true); // 下一回合（build）注入 ✅
-n3 = "build";
-assert.equal(shouldInjectModeNotice("build", n3), false); // 再下回合防抖
+n3 = "build"; // 即时 mode-notice 已显示并消费
+assert.equal(shouldInjectModeNotice("build", n3), false); // 后续 build 对话不重复
+
+/* -------------------- 批准后的即时 notice（pi sendMessage seam） -------------------- */
+{
+  const sent: Array<{ message: Record<string, unknown>; options: Record<string, unknown> | undefined }> = [];
+  const persisted: Array<{ customType: string; data: Record<string, unknown> }> = [];
+  const registeredTools = new Map<string, any>();
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
+  let activeTools = ["read", "bash", "edit", "write"];
+  const fakePi = {
+    on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => handlers.set(name, handler),
+    registerTool: (definition: { name: string }) => registeredTools.set(definition.name, definition),
+    getActiveTools: () => activeTools,
+    setActiveTools: (names: string[]) => {
+      activeTools = names;
+    },
+    appendEntry: (customType: string, data: Record<string, unknown>) => persisted.push({ customType, data }),
+    sendMessage: (message: Record<string, unknown>, options?: Record<string, unknown>) => sent.push({ message, options }),
+  } as any;
+  const store = PlanbuildStore.create(fakePi);
+  store.state.mode = "plan";
+  store.runtime.notifiedMode = "plan";
+  const ctx = {
+    cwd: process.cwd(),
+    ui: { setStatus: () => undefined, select: async () => "批准并执行" },
+  } as any;
+  const modes = registerModes(fakePi, store);
+
+  modes.enterBuildMode(ctx);
+  modes.announceModeNotice();
+  modes.announceModeNotice(); // 幂等：同一切换只发送一次
+
+  assert.equal(store.state.mode, "build");
+  assert.equal(store.runtime.notifiedMode, "build");
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0], {
+    message: {
+      customType: `${PB_ENTRY_TYPE}:mode-notice`,
+      content: modeNoticeContent("build"),
+      display: true,
+    },
+    options: { deliverAs: "steer" },
+  });
+  assert.equal(
+    persisted.filter((entry) => entry.customType === PB_ENTRY_TYPE && entry.data.kind === "mode").length,
+    1,
+  );
+
+  const beforeAgentStart = handlers.get("before_agent_start");
+  assert.ok(beforeAgentStart);
+  const nextBuild = beforeAgentStart({ systemPrompt: "base" }, ctx) as { message?: unknown };
+  assert.equal(nextBuild.message, undefined); // 即时 notice 已消费，下一次 build prompt 不重复
+  assert.equal(sent.length, 1);
+
+  /* 端到端覆盖批准分支：实际 tool execute 只追加一次 mode 事件并发送即时 notice。 */
+  const planFile = join(tmpdir(), `pi-plan-mode-notice-${process.pid}.md`);
+  store.state.mode = "plan";
+  store.state.planFilePath = planFile;
+  store.runtime.notifiedMode = "plan";
+  store.runtime.toolsBeforePlanMode = ["read", "bash", "edit", "write"];
+  sent.splice(0);
+  persisted.splice(0);
+  registeredTools.clear();
+  registerTools(fakePi, store, modes);
+  const completeTool = registeredTools.get("plan_mode_complete");
+  assert.ok(completeTool);
+  await completeTool.execute("call-1", { plan: "# Test plan\n\n1. Verify notice" }, undefined, undefined, ctx);
+  assert.equal(store.state.mode, "build");
+  assert.equal(sent.length, 1);
+  assert.equal(
+    persisted.filter((entry) => entry.customType === PB_ENTRY_TYPE && entry.data.kind === "mode").length,
+    1,
+  );
+  await unlink(planFile).catch(() => undefined);
+}
 
 /* -------------------- 计划预览消息区条目（buildPreviewMarkdown 纯函数） -------------------- */
 
